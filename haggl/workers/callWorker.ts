@@ -246,8 +246,7 @@ Your goal is to make the supplier feel they are speaking with someone who genuin
               await tables.calls
                 .update({ 
                   ended_at: new Date().toISOString(),
-                  duration_seconds: remoteCall.duration || 60,
-                  cost_millicents: 200
+                  duration_seconds: remoteCall.duration || 60
                 })
                 .eq("id", entry.callId);
 

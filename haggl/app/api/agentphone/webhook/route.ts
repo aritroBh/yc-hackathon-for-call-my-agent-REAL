@@ -222,6 +222,33 @@ export async function POST(req: NextRequest): Promise<Response> {
   try {
     const body = await req.json();
 
+    if (body.event === "agent.call_ended") {
+      const hagglCallId = body.metadata?.haggl_call_id;
+      if (hagglCallId) {
+        const { data: call } = await tables.calls.select("rfq_id, status").eq("id", hagglCallId).single();
+        if (call && call.status !== "completed" && call.status !== "failed") {
+          await tables.calls.update({
+            status: "completed",
+            ended_at: new Date().toISOString(),
+          }).eq("id", hagglCallId);
+          
+          const queue = getCallQueue();
+          const dispatcher = getDispatcher();
+          queue.complete(hagglCallId);
+          if (call.rfq_id) {
+            await dispatcher.incrementCompleted(call.rfq_id);
+          }
+          
+          getSocketServer()?.emit("call_status_changed", {
+            callId: hagglCallId,
+            rfqId: call.rfq_id,
+            status: "completed",
+          });
+        }
+      }
+      return NextResponse.json({ ok: true });
+    }
+
     if (body.event !== "agent.message" || body.channel !== "voice") {
       return NextResponse.json({ ok: true });
     }

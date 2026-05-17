@@ -29,6 +29,43 @@ export interface AgentPhoneAgentParams {
   beginMessage: string;
 }
 
+export async function provisionNumber(): Promise<{ numberId: string; phoneNumber: string }> {
+  try {
+    const result = await withRetry(async () => {
+      const res = await axios.post(`${BASE_URL}/numbers`, { country: "US" }, {
+        headers: getHeaders(),
+        timeout: 10000,
+      });
+      return res.data;
+    });
+    return {
+      numberId: result.numberId || result.id,
+      phoneNumber: result.phoneNumber || result.number,
+    };
+  } catch (err: any) {
+    logger.error("Failed to provision AgentPhone number", { error: err.message });
+    throw err;
+  }
+}
+
+export async function attachNumberToAgent(agentId: string, numberId: string): Promise<void> {
+  try {
+    await withRetry(async () => {
+      await axios.patch(`${BASE_URL}/agents/${agentId}`, { numberId }, {
+        headers: getHeaders(),
+        timeout: 10000,
+      });
+    });
+    logger.info("Attached number to AgentPhone agent", { metadata: { agentId, numberId } });
+  } catch (err: any) {
+    logger.error("Failed to attach number to AgentPhone agent", {
+      metadata: { agentId, numberId },
+      error: err.message,
+    });
+    throw err;
+  }
+}
+
 export async function createAgentPhoneAgent(
   params: AgentPhoneAgentParams
 ): Promise<{ agentId: string }> {
@@ -59,10 +96,27 @@ export async function createAgentPhoneAgent(
       return res.data;
     });
 
+    const agentId = result.agentId || result.id;
     log.info("AgentPhone voice agent created successfully", {
-      metadata: { agentId: result.agentId || result.id },
+      metadata: { agentId },
     });
-    return { agentId: result.agentId || result.id };
+
+    // Provision or attach phone number
+    let numberId = process.env.AGENTPHONE_NUMBER_ID || "";
+    let numberStr = "";
+    if (numberId) {
+      log.info(`Using pre-configured AGENTPHONE_NUMBER_ID: ${numberId}`);
+      await attachNumberToAgent(agentId, numberId);
+    } else {
+      log.info("No AGENTPHONE_NUMBER_ID set. Auto-provisioning a US number...");
+      const prov = await provisionNumber();
+      numberId = prov.numberId;
+      numberStr = prov.phoneNumber;
+      log.info(`Provisioned number: ${numberStr} (ID: ${numberId})`);
+      await attachNumberToAgent(agentId, numberId);
+    }
+
+    return { agentId };
   } catch (err: any) {
     log.error("Failed to create AgentPhone agent", { error: err.message });
     throw err;

@@ -136,10 +136,10 @@ export async function POST(request: NextRequest) {
       started_at: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
       ended_at: new Date(Date.now() - 1000 * 60 * 8).toISOString(),
       transcript: [
-        { role: "assistant", content: "Mema wo akye, Kofi. I am calling from HAGGL regarding the procurement order of 5,000 yards of traditional woven kente fabric." },
-        { role: "user", content: "Yaa Obaa/Owura. Yes, we can produce that. Our standard export price is $10 per yard, which is $50,000." },
-        { role: "assistant", content: "We want to partner with Kofi Textiles for Q2. Could we align on $8.40 per yard ($42,000 total) for this batch?" },
-        { role: "user", content: "Ah, okay. Because you speak our language and understand the local textile market, we can agree to $8.40 per yard. I will prepare the pro forma invoice now." }
+        { role: "assistant", content: "Mema wo akye, Owura Kofi. Mefrɛ wo firi HAGGL, yɛpɛ kente ntama 5,000 yards. Wubɛtumi de boɔ bi ma me?" },
+        { role: "user", content: "Aane, yɛtumi yɛ. Yɛn boɔ piesie ne $10 saa yard biara, enti yɛbɛhia $50,000 nyinaa." },
+        { role: "assistant", content: "Owura Kofi, yɛpɛ sɛ yɛyɛ adwuma bɔne wɔ Q2. Sɛ yɛde $8.40 saa yard biara ne $42,000 nyinaa a, ɛbɛyɛ yiye anaa?" },
+        { role: "user", content: "Ɛyɛ! Efisɛ wobɛkasa yɛn kasa na wuhu yɛn amammerɛ, yɛbɛne agyree wɔ $8.40 saa yard biara. Mɛyɛ invoice no nnɛ." }
       ],
       result: {
         quoted_price: 42000,
