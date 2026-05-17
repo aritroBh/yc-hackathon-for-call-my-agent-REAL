@@ -1,6 +1,6 @@
 # HAGGL — Autonomous Procurement Negotiation
 
-HAGGL dispatches AI voice agents that negotiate with suppliers in real time — with live market intelligence injected mid-call by Claude Opus.
+HAGGL dispatches AI voice agents that negotiate with West African suppliers in their native language — Twi, Akan, or Yoruba — autonomously closing deals and completing customs paperwork.
 
 ---
 
@@ -10,17 +10,17 @@ HAGGL dispatches AI voice agents that negotiate with suppliers in real time — 
 flowchart LR
   RFQ --> Dispatch
   Dispatch --> BrowserUse["Browser Use\nPre-call research"]
-  Dispatch --> Twilio
-  Twilio --> Deepgram["Deepgram\nVoice Agent\n(Gemini Live)"]
-  Deepgram --> OpusInjector["Claude Opus\nLive Intel Injection\n<4s, 30s cooldown"]
-  Deepgram --> Transcript
+  Dispatch --> AgentPhone["AgentPhone\nOutbound Call\n(STT + TTS)"]
+  AgentPhone --> Webhook["Webhook Handler\n/api/agentphone/webhook"]
+  Webhook --> Claude["Claude Opus\nNegotiates in\nTwi / Yoruba / English"]
+  Claude --> Transcript
   Transcript --> Haiku["Claude Haiku\nPost-call extraction"]
   Haiku --> Scoring
   Scoring --> Results
   Results --> Sponge["Sponge\nAuto payment"]
   Results --> AgentMail["AgentMail\nBuyer + supplier email"]
   Transcript --> Supermemory["Supermemory\nNegotiation memory"]
-  OpusInjector --> Moss["Moss\nSemantic search\n<10ms"]
+  Webhook --> Moss["Moss\nSemantic search\n<10ms"]
   Results --> RL["RL Pipeline\nPattern extraction\nDialect update"]
 ```
 

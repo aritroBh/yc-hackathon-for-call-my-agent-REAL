@@ -128,7 +128,7 @@ export function parseCSVBuffer(buffer: string): RawCSVRow[] {
       country: row.country || "",
       region: row.region || "",
       contact_name: row.contact_name || "",
-      language_primary: row.language_primary || "",
+      language_primary: row.language_primary || row.language || "",
     });
   }
 
@@ -279,6 +279,7 @@ export async function processSupplierImport(
         import_country: v.row.country || undefined,
         import_region: v.row.region || undefined,
         import_language: v.row.language_primary || undefined,
+        language: v.row.language_primary || "english",
         dialect_locale: inferLocale || undefined,
         dialect_prompt: dialectPrompt || undefined,
         imported_at: new Date().toISOString(),

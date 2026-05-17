@@ -108,7 +108,7 @@ Respond in JSON only, no markdown fences:
 }`;
 
     const response = await anthropic.messages.create({
-      model: "claude-3-5-sonnet-20241022",
+      model: "claude-opus-4-5-20250514", // Opus — the pitch is Opus watching the call in real time
       max_tokens: 300,
       messages: [{ role: "user", content: prompt }],
     });
@@ -278,7 +278,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       async start(controller) {
         try {
           const response = await anthropic.messages.create({
-            model: "claude-3-5-sonnet-20241022",
+            model: "claude-opus-4-5-20250514", // Opus — the pitch is Opus watching the call in real time
             max_tokens: 300,
             stream: true,
             system: systemPrompt,

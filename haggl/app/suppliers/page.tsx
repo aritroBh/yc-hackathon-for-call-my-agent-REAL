@@ -9,9 +9,10 @@ interface SupplierFormData {
   phone: string;
   email: string;
   dialect_prompt: string;
+  language: string;
 }
 
-const emptyForm: SupplierFormData = { name: "", contact_name: "", phone: "", email: "", dialect_prompt: "" };
+const emptyForm: SupplierFormData = { name: "", contact_name: "", phone: "", email: "", dialect_prompt: "", language: "" };
 
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -48,7 +49,14 @@ export default function SuppliersPage() {
 
   const openEdit = (s: Supplier) => {
     setEditingId(s.id);
-    setForm({ name: s.name, contact_name: s.contact_name || "", phone: s.phone, email: s.email || "", dialect_prompt: s.dialect_prompt || "" });
+    setForm({
+      name: s.name,
+      contact_name: s.contact_name || "",
+      phone: s.phone,
+      email: s.email || "",
+      dialect_prompt: s.dialect_prompt || "",
+      language: (s.metadata as any)?.language || "",
+    });
     setShowModal(true);
   };
 
@@ -62,6 +70,7 @@ export default function SuppliersPage() {
         phone: form.phone,
         email: form.email || null,
         dialect_prompt: form.dialect_prompt || null,
+        metadata: { language: form.language || "english" },
       };
       const url = editingId ? `/api/suppliers?id=${editingId}` : "/api/suppliers";
       const method = editingId ? "PUT" : "POST";
@@ -92,11 +101,11 @@ export default function SuppliersPage() {
   const handleImport = async () => {
     setImporting(true);
     try {
-      const rows = csvText.trim().split("\n").slice(1).map((line) => {
-        const [name, contact_name, phone, email] = line.split(",").map((s) => s.trim());
-        return { name, contact_name: contact_name || null, phone, email: email || null, dialect_prompt: null };
-      }).filter((r) => r.name && r.phone);
-      const res = await fetch("/api/suppliers?import=true", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ suppliers: rows }) });
+      const res = await fetch("/api/suppliers?import=true", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csv: csvText }),
+      });
       if (!res.ok) throw new Error("Import failed");
       setShowImport(false);
       setCsvText("");
@@ -119,6 +128,13 @@ export default function SuppliersPage() {
         {status}
       </span>
     );
+  };
+
+  const renderLanguage = (lang: string | unknown) => {
+    const clean = String(lang || "english").toLowerCase().trim();
+    if (clean === "twi" || clean === "akan") return "🇬🇭 Twi";
+    if (clean === "yoruba") return "🇳🇬 Yoruba";
+    return "🌐 English";
   };
 
   if (loading) return <div className="text-center py-12 text-gray-500">Loading...</div>;
@@ -150,6 +166,7 @@ export default function SuppliersPage() {
                   <th className="px-4 py-3 font-medium">Contact</th>
                   <th className="px-4 py-3 font-medium">Phone</th>
                   <th className="px-4 py-3 font-medium">Email</th>
+                  <th className="px-4 py-3 font-medium">Language</th>
                   <th className="px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 font-medium">Actions</th>
                 </tr>
@@ -161,6 +178,7 @@ export default function SuppliersPage() {
                     <td className="px-4 py-3 text-gray-600">{s.contact_name || "--"}</td>
                     <td className="px-4 py-3 text-gray-600 font-mono">{s.phone}</td>
                     <td className="px-4 py-3 text-gray-600">{s.email || "--"}</td>
+                    <td className="px-4 py-3 text-gray-600 font-medium">{renderLanguage((s.metadata as any)?.language)}</td>
                     <td className="px-4 py-3">{statusBadge(s.status)}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
@@ -198,6 +216,22 @@ export default function SuppliersPage() {
                 <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
               </div>
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Supplier Language</label>
+                <select
+                  value={form.language}
+                  onChange={(e) => setForm({ ...form, language: e.target.value })}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                >
+                  <option value="">English (default)</option>
+                  <option value="twi">Twi / Akan (Ghana)</option>
+                  <option value="yoruba">Yoruba (Nigeria)</option>
+                  <option value="english">English</option>
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  HAGGL will negotiate in the supplier&apos;s native language.
+                </p>
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Dialect Prompt</label>
                 <textarea value={form.dialect_prompt} onChange={(e) => setForm({ ...form, dialect_prompt: e.target.value })} rows={3} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" />
               </div>
@@ -216,12 +250,12 @@ export default function SuppliersPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-1">Import Suppliers from CSV</h2>
-            <p className="text-sm text-gray-500 mb-4">Paste CSV with columns: name,contact_name,phone,email</p>
+            <p className="text-sm text-gray-500 mb-4">Paste CSV with columns: name,phone,country,region,contact_name,language</p>
             <textarea
               value={csvText}
               onChange={(e) => setCsvText(e.target.value)}
               rows={10}
-              placeholder={`name,contact_name,phone,email\nAcme Corp,John Doe,+1234567890,john@acme.com\nBeta Inc,Jane Smith,+1987654321,jane@beta.com`}
+              placeholder={`name,phone,country,region,contact_name,language\nKofi Textiles Ltd,+233501234567,Ghana,Accra,Kofi Mensah,twi\nAdebayo Manufacturing,+2348012345678,Nigeria,Lagos,Adebayo Okafor,yoruba`}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
             />
             <div className="flex justify-end gap-3 mt-4">
