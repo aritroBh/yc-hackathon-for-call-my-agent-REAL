@@ -206,16 +206,18 @@ export class RLWorker {
         await this.persistPatterns(call.id, patterns);
         const updatedDialect = await this.updateDialectIfApplicable(inferredLocale, dialect, patterns);
         
-        // Push successful rebuttals to Moss Index
+        // Push successful rebuttals to Moss Index + Supermemory base
         try {
           const { addProcurementFact } = await import("@/lib/sponsors/moss");
+          const { promoteToBaseMemory } = await import("@/lib/sponsors/supermemory");
           for (const rebuttal of patterns.successful_rebuttals.slice(0, 3)) {
             if (rebuttal.effectiveness > 0.7) {
               await addProcurementFact(rebuttal.text).catch(() => {});
+              await promoteToBaseMemory(rebuttal.text).catch(() => {});
             }
           }
         } catch (err: any) {
-          console.warn("[RLWorker] Failed to push rebuttals to Moss:", err.message);
+          console.warn("[RLWorker] Failed to push rebuttals to Moss/Supermemory:", err.message);
         }
 
         await this.awardIfExceptional(call, patterns, rfq?.id || null, quotedPrice, floorPrice);

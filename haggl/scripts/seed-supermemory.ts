@@ -11,6 +11,7 @@ if (fs.existsSync('.env')) {
 const client = new Supermemory({ apiKey: process.env.SUPERMEMORY_API_KEY! })
 
 const CONTAINERS = {
+  BASE:      'haggl-base',
   COMPANY:   'haggl-company-context',
   LANGUAGES: 'haggl-language-context',
   VENDORS:   'haggl-vendor-context',
@@ -226,9 +227,15 @@ async function main() {
   await seedContainer(CONTAINERS.COMPANY, COMPANY_MEMORIES, 'Company Context')
   await seedContainer(CONTAINERS.LANGUAGES, LANGUAGE_MEMORIES, 'Language + Cultural Context')
   await seedContainer(CONTAINERS.VENDORS, VENDOR_MEMORIES, 'Vendor + Procurement Context')
+  await seedContainer(
+    CONTAINERS.BASE,
+    [...COMPANY_MEMORIES, ...LANGUAGE_MEMORIES, ...VENDOR_MEMORIES],
+    'Base Knowledge (consolidated)'
+  )
 
   console.log('\n✅ All containers seeded. HAGGL Supermemory is ready.')
   console.log('Containers created:')
+  console.log('  haggl-base               — consolidated base, grown by the RL loop')
   console.log('  haggl-company-context    — who HAGGL is')
   console.log('  haggl-language-context   — Twi, Yoruba, Hindi culture')
   console.log('  haggl-vendor-context     — supplier knowledge, pricing, compliance')

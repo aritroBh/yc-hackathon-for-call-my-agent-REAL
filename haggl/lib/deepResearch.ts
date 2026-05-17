@@ -89,12 +89,17 @@ Return a structured JSON array of suppliers at the END of your report in this ex
     headers: {
       "Content-Type": "application/json",
       "x-goog-api-key": GEMINI_API_KEY,
+      "Api-Revision": "2026-05-20",
     },
     body: JSON.stringify({
-      input,
       agent: AGENT,
+      input,
+      agent_config: {
+        type: "deep-research",
+        thinking_summaries: "auto",
+        collaborative_planning: true,
+      },
       background: true,
-      collaborative_planning: true,
     }),
   })
 
@@ -115,60 +120,70 @@ Return a structured JSON array of suppliers at the END of your report in this ex
     })
     const poll = await pollRes.json()
 
-    if (poll.status === "awaiting_plan_approval" || poll.plan) {
-      const planText = poll.plan?.content?.[0]?.text || poll.steps?.[0]?.content?.[0]?.text || "Research plan ready."
+    if (poll.status === "completed") {
+      // With collaborative_planning the first completion IS the plan,
+      // not the final report. Execution happens in a follow-up interaction.
+      const planText =
+        poll.steps?.at(-1)?.content?.[0]?.text ||
+        poll.outputs?.at(-1)?.text ||
+        "Research plan ready."
       return { interactionId, plan: planText }
     }
 
-    if (poll.status === "completed") {
-      // Research completed without waiting for plan approval
-      const report = poll.steps?.at(-1)?.content?.[0]?.text || ""
-      return { interactionId: interactionId + ":done:" + encodeURIComponent(report), plan: "Research completed." }
-    }
-
     if (poll.status === "failed") {
-      throw new Error(`Deep Research failed: ${poll.error}`)
+      throw new Error(`Deep Research failed: ${poll.error || JSON.stringify(poll)}`)
     }
   }
 
   throw new Error("Deep Research plan step timed out after 3 minutes")
 }
 
-/** Step 2: Approve the plan and wait for the full research to complete. */
-export async function approveAndExecuteResearch(interactionId: string): Promise<string> {
-  // If already done (encoded in id), return immediately
-  if (interactionId.includes(":done:")) {
-    return decodeURIComponent(interactionId.split(":done:")[1])
-  }
-
-  // Approve the plan
-  const approveRes = await fetch(`${BASE}/interactions/${interactionId}`, {
+/** Step 2: Approve the plan and wait for the full research to complete.
+ *  Approval = a NEW interaction that references the plan and flips
+ *  collaborative_planning OFF. That is what triggers report generation. */
+export async function approveAndExecuteResearch(planInteractionId: string): Promise<string> {
+  const approveRes = await fetch(`${BASE}/interactions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "x-goog-api-key": GEMINI_API_KEY,
+      "Api-Revision": "2026-05-20",
     },
-    body: JSON.stringify({ action: "approve_plan" }),
+    body: JSON.stringify({
+      agent: AGENT,
+      input: "The plan looks good. Proceed with the full research and find the suppliers.",
+      agent_config: {
+        type: "deep-research",
+        thinking_summaries: "auto",
+        collaborative_planning: false,
+      },
+      previous_interaction_id: planInteractionId,
+      background: true,
+    }),
   })
 
   if (!approveRes.ok) {
-    // Some versions don't need explicit approval — just poll
-    console.warn("[deepResearch] approve_plan returned", approveRes.status, "— polling anyway")
+    const err = await approveRes.text()
+    throw new Error(`Deep Research approve failed: ${approveRes.status} ${err}`)
   }
 
-  // Poll for completion
+  const approveData = await approveRes.json()
+  const execId: string = approveData.id
+  if (!execId) throw new Error("Deep Research approve returned no interaction id")
+
+  // Poll the NEW interaction for the final report.
   for (let i = 0; i < 120; i++) {
     await new Promise(r => setTimeout(r, 5000))
-    const pollRes = await fetch(`${BASE}/interactions/${interactionId}`, {
+    const pollRes = await fetch(`${BASE}/interactions/${execId}`, {
       headers: { "x-goog-api-key": GEMINI_API_KEY },
     })
     const poll = await pollRes.json()
 
     if (poll.status === "completed") {
-      return poll.steps?.at(-1)?.content?.[0]?.text || ""
+      return poll.steps?.at(-1)?.content?.[0]?.text || poll.outputs?.at(-1)?.text || ""
     }
     if (poll.status === "failed") {
-      throw new Error(`Research failed: ${poll.error}`)
+      throw new Error(`Research failed: ${poll.error || JSON.stringify(poll)}`)
     }
   }
 

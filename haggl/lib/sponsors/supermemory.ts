@@ -12,6 +12,7 @@ function getClient(): Supermemory | null {
 // ── Container tags ───────────────────────────────────
 // Three separate memory spaces:
 export const CONTAINERS = {
+  BASE:       'haggl-base',                 // Consolidated base knowledge, grown by the RL loop
   COMPANY:    'haggl-company-context',      // Who HAGGL is, what it does
   LANGUAGES:  'haggl-language-context',     // Twi, Yoruba, Hindi, cultural negotiation rules
   VENDORS:    'haggl-vendor-context',       // Supplier knowledge, procurement patterns
@@ -27,8 +28,12 @@ export async function getSupplierMemory(
   if (!client) { console.warn('[supermemory] no key — skipping supplier memory'); return "" }
 
   try {
-    // Search both vendor context and live negotiation history
-    const [vendorRes, negotiationRes] = await Promise.all([
+    // Search consolidated base knowledge, vendor context, and live history
+    const [baseRes, vendorRes, negotiationRes] = await Promise.all([
+      client.search.documents({
+        q: `${supplierName} ${region || ''} procurement pricing benchmarks`.trim(),
+        containerTags: [CONTAINERS.BASE],
+      }),
       client.search.documents({
         q: `${supplierName} ${region || ''} supplier vendor`.trim(),
         containerTags: [CONTAINERS.VENDORS],
@@ -40,6 +45,7 @@ export async function getSupplierMemory(
     ])
 
     const all = [
+      ...(baseRes.results || []),
       ...(vendorRes.results || []),
       ...(negotiationRes.results || []),
     ]
@@ -67,11 +73,17 @@ export async function getLanguageContext(locale: string): Promise<string> {
   if (!client) return ''
 
   try {
-    const res = await client.search.documents({
-      q: locale + ' language negotiation culture business',
-      containerTags: [CONTAINERS.LANGUAGES],
-    })
-    return (res.results || [])
+    const [baseRes, langRes] = await Promise.all([
+      client.search.documents({
+        q: locale + ' language negotiation phrases culture',
+        containerTags: [CONTAINERS.BASE],
+      }),
+      client.search.documents({
+        q: locale + ' language negotiation culture business',
+        containerTags: [CONTAINERS.LANGUAGES],
+      }),
+    ])
+    return [...(baseRes.results || []), ...(langRes.results || [])]
       .map((m: any) => {
         if (m.chunks && Array.isArray(m.chunks) && m.chunks.length > 0) {
           return m.chunks.map((c: any) => c.content).filter(Boolean).join(' ')
@@ -147,5 +159,24 @@ export async function storeNegotiationMemory(params: {
     console.log('[supermemory] stored negotiation memory for', params.supplierName)
   } catch (err: any) {
     console.warn('[supermemory] store failed:', err.message)
+  }
+}
+
+// ── WRITE: Promote a learned fact into base knowledge ──
+// Called by the RL loop so effective rebuttals grow the base every cycle.
+export async function promoteToBaseMemory(fact: string): Promise<void> {
+  const client = getClient()
+  if (!client) return
+  if (!fact || !fact.trim()) return
+
+  try {
+    await client.add({
+      content: fact,
+      containerTag: CONTAINERS.BASE,
+      metadata: { promoted_at: new Date().toISOString(), source: 'rl_promotion' },
+    })
+    console.log('[supermemory] promoted to base:', fact.slice(0, 80))
+  } catch (err: any) {
+    console.warn('[supermemory] promotion failed:', err.message)
   }
 }
