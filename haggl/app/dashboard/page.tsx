@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { useSocket } from "@/lib/socket";
 import type { NegotiationCall, LiveCallEvent, TranscriptEntry } from "@/types";
 
@@ -19,12 +20,56 @@ interface LiveTranscriptDelta {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { socket, connected } = useSocket();
   const [calls, setCalls] = useState<NegotiationCall[]>([]);
   const [stats, setStats] = useState<CallStats>({ total_today: 0, active: 0, completed: 0, failed: 0 });
   const [liveEntries, setLiveEntries] = useState<LiveTranscriptDelta[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [demoLoading, setDemoLoading] = useState(false);
+  const [rlLoading, setRlLoading] = useState(false);
+  const [rlResult, setRlResult] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const handleRunDemo = async () => {
+    setDemoLoading(true);
+    setRlResult(null);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/demo/seed", { method: "POST" });
+      if (!res.ok) throw new Error("Failed to run demo seeding");
+      const data = await res.json();
+      const rfqId = data.rfqId || data.rfq_id;
+      if (rfqId) {
+        router.push(`/rfq/${rfqId}/monitor`);
+      } else {
+        throw new Error("No rfqId returned from demo seeding");
+      }
+    } catch (err: any) {
+      setActionError(err.message || "Failed to run demo");
+    } finally {
+      setDemoLoading(false);
+    }
+  };
+
+  const handleOptimizeRL = async () => {
+    setRlLoading(true);
+    setRlResult(null);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/rl/run", { method: "POST" });
+      if (!res.ok) throw new Error("Failed to run RL optimization");
+      const data = await res.json();
+      const count = data.newlyAnalyzedCount ?? 0;
+      setRlResult(`RL complete — ${count} calls processed`);
+    } catch (err: any) {
+      setActionError(err.message || "Failed to optimize agent");
+    } finally {
+      setRlLoading(false);
+    }
+  };
 
   const fetchCalls = useCallback(async () => {
     try {
@@ -116,20 +161,91 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        {connected ? (
-          <span className="flex items-center gap-1 text-sm text-green-600">
-            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-            Live
-          </span>
-        ) : (
-          <span className="flex items-center gap-1 text-sm text-gray-400">
-            <span className="w-2 h-2 bg-gray-300 rounded-full" />
-            Offline
-          </span>
-        )}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-gray-100 pb-5">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+          <p className="text-sm text-gray-500 mt-1">Monitor and manage autonomous procurement negotiations in real time.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={handleOptimizeRL}
+            disabled={demoLoading || rlLoading}
+            className="border border-emerald-600 text-emerald-600 hover:bg-emerald-50 px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
+          >
+            {rlLoading ? (
+              <>
+                <svg className="animate-spin h-4 w-4 text-emerald-600" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                <span>Running RL...</span>
+              </>
+            ) : (
+              "Optimize Agent (RL)"
+            )}
+          </button>
+
+          <button
+            onClick={handleRunDemo}
+            disabled={demoLoading || rlLoading}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50 flex items-center gap-2 shadow-sm"
+          >
+            {demoLoading ? (
+              <>
+                <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                <span>Running Demo...</span>
+              </>
+            ) : (
+              "Run Demo"
+            )}
+          </button>
+
+          <div className="h-6 w-px bg-gray-200 hidden sm:block mx-1" />
+
+          {connected ? (
+            <span className="flex items-center gap-1.5 text-sm font-medium text-green-600 bg-green-50 px-2.5 py-1 rounded-full">
+              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+              Live
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-sm font-medium text-gray-400 bg-gray-50 px-2.5 py-1 rounded-full">
+              <span className="w-2 h-2 bg-gray-300 rounded-full" />
+              Offline
+            </span>
+          )}
+        </div>
       </div>
+
+      {rlResult && (
+        <div className="bg-emerald-50 border-l-4 border-emerald-500 p-4 rounded-md shadow-sm flex items-center justify-between animate-fade-in">
+          <div className="flex items-center">
+            <svg className="h-5 w-5 text-emerald-500 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="text-emerald-800 font-medium">{rlResult}</span>
+          </div>
+          <button onClick={() => setRlResult(null)} className="text-emerald-500 hover:text-emerald-700 font-semibold text-sm">
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-md shadow-sm flex items-center justify-between animate-fade-in">
+          <div className="flex items-center">
+            <svg className="h-5 w-5 text-red-500 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span className="text-red-800 font-medium">{actionError}</span>
+          </div>
+          <button onClick={() => setActionError(null)} className="text-red-500 hover:text-red-700 font-semibold text-sm">
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
