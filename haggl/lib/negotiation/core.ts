@@ -154,7 +154,7 @@ Confidence: ${parsed.confidence}
     await tables.reasoning_traces.insert({
       call_id: callId,
       trace_type: "live_intel_injection",
-      provider: "claude",
+      provider: "gemini",
       phase: "negotiating",
       input_data: {
         call_id: callId,
@@ -252,7 +252,7 @@ export type NegotiationTurnEvent =
 
 /**
  * Run one negotiation turn. Loads RFQ/supplier/call context, runs intel,
- * builds the dialect-aware system prompt, streams Claude Opus, handles the
+ * builds the dialect-aware system prompt, streams Gemini, handles the
  * `mark_complete` tool, persists transcript turns + socket events.
  *
  * Yields incremental `delta` text events, then a final `done` event.
