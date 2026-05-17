@@ -77,6 +77,17 @@ server.listen(PORT, () => {
       console.warn('[startup] Moss index init failed (non-fatal):', err.message);
     }
   })();
+
+  // Vapi custom-transcriber WS (buffers audio, calls Khaya ASR). Lives here
+  // because the Next.js App Router cannot host a raw WebSocket server.
+  (async () => {
+    try {
+      const { attachVapiTranscriber } = await import(resolveLib("../lib/vapi/transcriberSocket.ts"));
+      attachVapiTranscriber(server);
+    } catch (err) {
+      console.warn('[startup] Vapi transcriber attach failed (non-fatal):', err.message);
+    }
+  })();
 });
 
 process.on("SIGTERM", () => { server.close(() => process.exit(0)); });

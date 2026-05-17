@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { getCallQueue } from "@/lib/queue";
 import { getDispatcher } from "@/lib/dispatcher";
-import { createAgentPhoneAgent, createOutboundCall, getCall } from "@/lib/agentphone";
+import { createVapiAssistant, createVapiCall, getVapiCall } from "@/lib/vapi";
 import { tables, getSupplierById, getRFQById } from "@/lib/db";
 import { getDialectByLocale } from "@/lib/prompts/dialectPrompts";
 import { buildNegotiationPrompt } from "@/lib/promptBuilder";
@@ -171,31 +171,35 @@ Your goal is to make the supplier feel they are speaking with someone who genuin
 
       const beginMessage = dialectContext?.greetingPhrase || "Hello, I am calling from HAGGL to negotiate the procurement quote.";
 
-      // 4. Provision AgentPhone voice agent dynamically
-      const { agentId } = await createAgentPhoneAgent({
+      // 4. Provision a Vapi assistant (custom Khaya STT/TTS + haggl LLM) per call
+      const { assistantId } = await createVapiAssistant({
         name: `HAGGL Agent - ${supplier.name}`,
         systemPrompt,
         language,
         beginMessage,
+        hagglCallId: entry.callId,
       });
 
-      // 5. Initiate AgentPhone Outbound Call
-      const { agentPhoneCallId } = await createOutboundCall({
-        agentId,
+      // 5. Initiate the Vapi outbound call
+      const { vapiCallId } = await createVapiCall({
+        assistantId,
         toPhone: entry.phone,
         callId: entry.callId,
       });
 
-      queue.markCalling(entry.callId, agentPhoneCallId);
+      // NOTE: twilio_call_sid now holds the generic remote-provider call id
+      // (the Vapi call id) — no schema change. Do not wire real Twilio polling
+      // against this column.
+      queue.markCalling(entry.callId, vapiCallId);
 
       await tables.calls
         .update({
           status: "ringing",
-          twilio_call_sid: agentPhoneCallId,
+          twilio_call_sid: vapiCallId,
         })
         .eq("id", entry.callId);
 
-      getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "ringing", twilioCallSid: agentPhoneCallId });
+      getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "ringing", twilioCallSid: vapiCallId });
 
       const callTimeoutMs = this.opts.callTimeoutSeconds * 1000;
       const timeout = setTimeout(async () => {
@@ -209,7 +213,7 @@ Your goal is to make the supplier feel they are speaking with someone who genuin
             })
             .eq("id", entry.callId);
 
-          getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "no_answer", twilioCallSid: agentPhoneCallId });
+          getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "no_answer", twilioCallSid: vapiCallId });
 
           queue.fail(entry.callId, "No answer - timed out");
           dispatcher.incrementFailed(entry.rfqId);
@@ -234,7 +238,7 @@ Your goal is to make the supplier feel they are speaking with someone who genuin
           }
 
           if (c.twilio_call_sid) {
-            const remoteCall = await getCall(c.twilio_call_sid);
+            const remoteCall = await getVapiCall(c.twilio_call_sid);
 
             if (remoteCall.status === "completed") {
               clearTimeout(timeout);
