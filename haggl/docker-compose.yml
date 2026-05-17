@@ -1,0 +1,61 @@
+version: "3.8"
+
+services:
+  haggl-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - WS_PORT=3001
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
+      - TWILIO_WEBHOOK_BASE=${TWILIO_WEBHOOK_BASE}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - SERVICE_NAME=haggl-web
+      - HAGGL_DATA_DIR=/data
+      - ENABLE_AUTH=${ENABLE_AUTH:-true}
+      - DEMO_MODE=${DEMO_MODE:-false}
+      - MAX_CONCURRENT_CALLS=${MAX_CONCURRENT_CALLS:-8}
+      - CALLS_PER_SECOND=${CALLS_PER_SECOND:-1}
+    volumes:
+      - haggl_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Redis for queue persistence (falls back to file-based)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    profiles:
+      - redis
+
+volumes:
+  haggl_data:
+  redis_data:
