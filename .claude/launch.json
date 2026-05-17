@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "haggl",
-      "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "cd haggl && ENABLE_AUTH=false npm run dev"],
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "set ENABLE_AUTH=false&& npm --prefix haggl run dev"],
       "port": 3000,
       "autoPort": true
     }

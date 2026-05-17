@@ -1,0 +1,125 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* ── Atlas raw tokens ─────────────────────────────────────── */
+  --paper: #faf8f3;
+  --surface: #ffffff;
+  --surface-2: #f4efe5;
+  --border: #e6dfd0;
+  --border-soft: #efe9dc;
+
+  --ink: #1b1a17;
+  --ink-2: #6b6557;
+  --ink-3: #9c9485;
+
+  --clay: #b45a35;
+  --clay-deep: #9c4825;
+  --clay-tint: #f1e5da;
+
+  --status-green: #3e7a45;
+  --status-amber: #b58419;
+  --status-red: #b5432b;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+
+  /* ── shadcn semantic mappings → Atlas (override defaults) ──── */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--clay);
+  --primary-foreground: #ffffff;
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--ink-2);
+  --accent: var(--clay-tint);
+  --accent-foreground: var(--clay-deep);
+  --destructive: var(--status-red);
+  --destructive-foreground: #ffffff;
+  --input: var(--border);
+  --ring: var(--clay);
+
+  /* ── fonts (next/font sets the underlying vars) ───────────── */
+  --font-display: var(--font-fraunces);
+  --font-body: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body), system-ui, sans-serif;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Visible focus ring everywhere — never removed without replacement */
+  :focus-visible {
+    outline: 2px solid var(--clay);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
+  ::selection {
+    background-color: var(--clay-tint);
+    color: var(--clay-deep);
+  }
+}
+
+@layer utilities {
+  /* tabular figures for prices, counts, timers, transcript stamps */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+
+  .font-display {
+    font-family: var(--font-display), Georgia, serif;
+  }
+
+  .font-mono {
+    font-family: var(--font-mono), ui-monospace, monospace;
+  }
+
+  /* thin, paper-toned scrollbars */
+  .scroll-fade {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .scroll-fade::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scroll-fade::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 999px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

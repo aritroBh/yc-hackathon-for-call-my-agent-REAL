@@ -41,6 +41,10 @@ export async function khayaTranscribe(
   audio: Buffer,
   language: string = ASR_LANGUAGE
 ): Promise<string> {
+  if (!API_KEY) {
+    console.warn("[khaya] KHAYA_API_KEY not set — transcription skipped");
+    return "";
+  }
   try {
     const data = await withRetry(async () => {
       const res = await axios.post(
@@ -88,6 +92,12 @@ export async function khayaSynthesize(
   text: string,
   opts: KhayaSynthesizeOptions = {}
 ): Promise<Buffer> {
+  if (!API_KEY) {
+    console.warn("[khaya] KHAYA_API_KEY not set — returning silence");
+    // Return 100ms of silence (WAV header + empty PCM at 16kHz mono 16-bit)
+    const silence = Buffer.alloc(44 + 3200, 0); // 44 byte header + 100ms silence
+    return silence;
+  }
   // TTS v2 with stream:true returns 16-bit PCM WAV (~15x faster than v1 on
   // long text: ~3 s vs ~47 s). non-stream v2 returns float32 WAV — either way
   // stripWavHeader + decodeToInt16 normalizes it downstream.

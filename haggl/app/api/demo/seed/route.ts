@@ -39,10 +39,10 @@ export async function POST(request: NextRequest) {
       id: rfqId,
       organization_id: orgId,
       created_by: userId,
-      title: "West Africa Textile Import — Q2 2026",
-      description: "Sourcing 5,000 units of traditional woven fabric from Ghana/Nigeria suppliers",
+      title: "Multi-Supplier Textile Procurement — Ghana & India",
+      description: "Sourcing 5,000 yards of woven fabric from West Africa and South Asia",
       items: [
-        { sku: "KENTE-001", quantity: 5000, description: "Traditional woven kente fabric (48in width)", unit: "yards", target_unit_price: 8.50 }
+        { sku: "FABRIC-001", quantity: 5000, description: "Export-quality woven fabric (48in width)", unit: "yards", target_unit_price: 8.50 }
       ],
       target_price: 42500,
       currency: "USD",
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
         id: uuid(),
         name: "Kofi Textiles Ltd",
         contact_name: "Kofi Mensah",
-        phone: "+233501234567",
+        phone: "+13187506130",
         email: "kofi@kofitextiles.com.gh",
         metadata: {
           language: "twi",
@@ -66,28 +66,15 @@ export async function POST(request: NextRequest) {
       },
       {
         id: uuid(),
-        name: "Adebayo Manufacturing",
-        contact_name: "Adebayo Okafor",
-        phone: "+2348012345678",
-        email: "adebayo@adebayomfg.ng",
+        name: "Rajesh Fabrics Pvt Ltd",
+        contact_name: "Rajesh Kumar",
+        phone: "+19257818082",
+        email: "rajesh@rajeshfabrics.in",
         metadata: {
-          language: "yoruba",
-          region: "Lagos",
-          country: "NG",
-          specialization: "Garment manufacturing and export",
-        }
-      },
-      {
-        id: uuid(),
-        name: "Ghana Agro Exports",
-        contact_name: "Abena Asante",
-        phone: "+233209876543",
-        email: "abena@ghanaagro.com",
-        metadata: {
-          language: "akan",
-          region: "Kumasi",
-          country: "GH",
-          specialization: "Cocoa and agricultural commodity export",
+          language: "hindi",
+          region: "Ludhiana",
+          country: "IN",
+          specialization: "Woolen fabric and textile export",
         }
       },
     ];
@@ -112,20 +99,19 @@ export async function POST(request: NextRequest) {
         rfq_id: rfqId,
         supplier_id: s.id,
         dialect_id: dialect?.id || null,
-        status: s.name === "Kofi Textiles Ltd" ? "agreed" : s.name === "Adebayo Manufacturing" ? "declined" : "pending",
+        status: "agreed",
         priority: 50,
       }).select().single();
       rfqSuppliers.push(linked);
     }
 
     // 6. Seed Calls
-    const aluMaxCallId = uuid();
-    const apexCallId = uuid();
-    const rapidCallId = uuid();
+    const twiCallId = uuid();
+    const hindiCallId = uuid();
 
-    // Call 1: Successful agreed call (Kofi Textiles Ltd)
+    // Call 1: Kofi Textiles Ltd (Ghana) — negotiated in Twi, agreed
     await tables.calls.insert({
-      id: aluMaxCallId,
+      id: twiCallId,
       rfq_id: rfqId,
       supplier_id: suppliersData[0].id,
       rfq_supplier_id: rfqSuppliers[0].id,
@@ -152,68 +138,60 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    // Call 2: Declined call (Adebayo Manufacturing)
+    // Call 2: Rajesh Fabrics Pvt Ltd (India) — negotiated in Hindi, agreed
     await tables.calls.insert({
-      id: apexCallId,
+      id: hindiCallId,
       rfq_id: rfqId,
       supplier_id: suppliersData[1].id,
       rfq_supplier_id: rfqSuppliers[1].id,
       status: "completed",
       phase: "completed",
-      duration_seconds: 92,
-      cost_millicents: 12000,
-      started_at: new Date(Date.now() - 1000 * 60 * 20).toISOString(),
-      ended_at: new Date(Date.now() - 1000 * 60 * 18).toISOString(),
+      duration_seconds: 198,
+      cost_millicents: 26000,
+      started_at: new Date(Date.now() - 1000 * 60 * 22).toISOString(),
+      ended_at: new Date(Date.now() - 1000 * 60 * 19).toISOString(),
       transcript: [
-        { role: "assistant", content: "Ẹ n lẹ o, Adebayo. I am calling from HAGGL regarding garment manufacturing capacity for 5,000 yards." },
-        { role: "user", content: "Ẹ n lẹ o. We looked at your kente specs, but our handloom weavers are fully booked for the next 3 months. Unfortunately, we must decline this order." }
+        { role: "assistant", content: "Namaste ji! Main HAGGL ki taraf se Rajesh ji se baat karna chahta hoon. Kya aap available hain?" },
+        { role: "user", content: "Haan ji, main Rajesh bol raha hoon. Bataiye, kya kaam hai aapka?" },
+        { role: "assistant", content: "Rajesh ji, humein 5,000 yards woolen fabric chahiye — export quality. Aapka kya rate hoga per yard?" },
+        { role: "user", content: "Ji, hamara standard export rate hai $12 per yard. Lekin quantity ke hisaab se kuch adjustment ho sakta hai." },
+        { role: "assistant", content: "Rajesh ji, yeh thoda zyada lag raha hai. Ludhiana market mein $9.50 ka rate chal raha hai is quality ke liye. Kya aap $9.80 per yard mein de sakte hain? Hum regular orders denge." },
+        { role: "user", content: "Aapne sahi kaha ji. Aap hamare purane customer ban jaoge toh main $10.20 mein kar sakta hoon. Isse kam karna mushkil hai." },
+        { role: "assistant", content: "Rajesh ji, hum Q2 aur Q3 dono mein order denge — total 10,000 yards. Iss commitment ke saath kya $9.90 per yard ho sakta hai? Yeh long-term partnership ka shuruaat hoga." },
+        { role: "user", content: "Haan ji, 10,000 yards ke liye main $9.90 maan sakta hoon. Bahut achha! Agreement ho gaya. Main invoice bhej deta hoon." }
       ],
       result: {
-        quoted_price: null,
-        lead_time_days: null,
-        certifications: ["WRAP-Certified"],
-        communication_quality: 7,
-        negotiation_effectiveness: 2,
-        composite_score: 45,
-        outcome: "declined",
+        quoted_price: 49500,
+        lead_time_days: 45,
+        certifications: ["OEKO-TEX Standard 100", "BIS Certified", "FIEO Member"],
+        communication_quality: 9,
+        negotiation_effectiveness: 9,
+        composite_score: 91,
+        outcome: "agreed",
       }
     });
 
-    // Call 3: Failed call (Ghana Agro Exports)
-    await tables.calls.insert({
-      id: rapidCallId,
-      rfq_id: rfqId,
-      supplier_id: suppliersData[2].id,
-      rfq_supplier_id: rfqSuppliers[2].id,
-      status: "failed",
-      phase: "failed",
-      duration_seconds: 45,
-      cost_millicents: 6000,
-      started_at: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
-      ended_at: new Date(Date.now() - 1000 * 60 * 29).toISOString(),
-      error_message: "AgentPhone media connection timeout",
-      result: null
-    });
-
-    // 7. Seed Reasoning Traces for Kofi Textiles Ltd
+    // 7. Seed Reasoning Trace for Kofi Textiles Ltd (Twi intel injection)
     const traceOutput = {
-      rebuttal_context: "Supplier quoted $10/yard.",
-      facts: "Current local Ghana handloom baseline is $8.20-$8.80/yard.",
-      suggested_position: "Offer $8.40/yard with Q2 textile volume commitment.",
+      rebuttal_context: "Supplier anchored at $10/yard — 19% above the Moss market rate of $8.40/yard.",
+      facts: "Kente cloth market rate 2026: machine-woven $8.40–$8.80/yard (Moss). Local Ghana handloom baseline $8.20–$8.80/yard.",
+      suggested_position: "Counter at $8.40/yard citing AGOA import volumes and a Q2 commitment.",
       confidence: "high",
+      moss_facts: ["Kente cloth benchmark: $8–11/yard machine woven", "Kumasi handloom baseline: $8.20–$8.80/yard"],
+      supermemory_context: "Prior Kofi Textiles deal settled at $8.40/yard in Q4 2025.",
       injected_text: "We want to build a long-term relationship. Could you match the current Kumasi market baseline of $8.40 in exchange for a Q2 commitment?",
     };
 
     await tables.reasoning_traces.insert({
-      call_id: aluMaxCallId,
+      call_id: twiCallId,
       trace_type: "live_intel_injection",
       provider: "claude",
       phase: "negotiating",
       input_data: {
-        call_id: aluMaxCallId,
-        supplier_turn: "Our standard export price is $10 per yard, which is $50,000.",
+        call_id: twiCallId,
+        supplier_turn: "Aane, yɛtumi yɛ. Yɛn boɔ piesie ne $10 saa yard biara, enti yɛbɛhia $50,000 nyinaa.",
         negotiation_context: {
-          partName: "West Africa Textile Import — Q2 2026",
+          partName: "Multi-Supplier Textile Procurement — Ghana & India",
           quantity: 5000,
           targetPrice: 42500,
           currency: "USD",
@@ -221,12 +199,39 @@ export async function POST(request: NextRequest) {
         },
       },
       output_data: traceOutput,
-      latency_ms: 1240,
+      tokens_used: 280,
+      latency_ms: 1840,
+    });
+
+    // Reasoning Trace for Rajesh Fabrics (Hindi intel injection — Moss + Supermemory)
+    await tables.reasoning_traces.insert({
+      call_id: hindiCallId,
+      trace_type: 'live_intel_injection',
+      provider: 'gemini',
+      phase: 'negotiating',
+      input_data: {
+        supplier_turn: "hamara standard export rate hai $12 per yard",
+        call_id: hindiCallId,
+      },
+      output_data: {
+        rebuttal_context: "Supplier anchored at $12/yard — Moss market data shows Ludhiana woolen export at $9.50/yard",
+        facts: "Ludhiana woolen fabric export benchmark 2026: $9.50–$10.20/yard for 5,000+ unit orders",
+        suggested_position: "Counter at $9.80/yard citing Ludhiana market rate and long-term volume commitment",
+        confidence: "high",
+        moss_facts: [
+          "India textile pricing: Wool sweater Ludhiana $8–15/unit",
+          "Volume commitment unlocks 12–15% discount from Indian suppliers",
+        ],
+        supermemory_context: "Hindi suppliers respond well to long-term partnership framing over single-order pressure",
+        injected_text: "[LIVE INTEL] Market $9.50/yard vs ask $12. Counter at $9.80 with volume commitment.",
+      },
+      tokens_used: 265,
+      latency_ms: 1620,
     });
 
     // 8. Seed Feedback for Kofi Textiles Ltd
     await tables.feedback.insert({
-      call_id: aluMaxCallId,
+      call_id: twiCallId,
       rfq_id: rfqId,
       supplier_id: suppliersData[0].id,
       user_id: userId,
@@ -239,7 +244,7 @@ export async function POST(request: NextRequest) {
       success: true,
       message: "Demo seeded successfully!",
       rfqId,
-      calls: { aluMaxCallId, apexCallId, rapidCallId }
+      calls: { twiCallId, hindiCallId }
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

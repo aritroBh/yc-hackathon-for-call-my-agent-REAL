@@ -11,14 +11,17 @@ const envSchema = z.object({
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
 
-  TWILIO_ACCOUNT_SID: z.string().min(1),
-  TWILIO_AUTH_TOKEN: z.string().min(1),
-  TWILIO_PHONE_NUMBER: z.string().min(1),
-  TWILIO_WEBHOOK_BASE: z.string().url().optional(),
-  TWILIO_WEBHOOK_BASE_URL: z.string().url().optional(),
-  SERVER_WEBHOOK_BASE: z.string().url().optional(),
-
-  DEEPGRAM_API_KEY: z.string().min(1),
+  GEMINI_API_KEY: z.string().min(1),
+  GEMINI_MODEL: z.string().default('gemini-3.1-flash-lite'),
+  VAPI_API_KEY: z.string().min(1),
+  VAPI_BASE_URL: z.string().url().default('https://api.vapi.ai'),
+  VAPI_PHONE_NUMBER_ID: z.string().optional(),
+  BRIDGE_PUBLIC_WS_URL: z.string().default('wss://localhost:3001'),
+  KHAYA_API_KEY: z.string().optional(),
+  KHAYA_BASE_URL: z.string().url().default('https://translation-api.ghananlp.org'),
+  KHAYA_ASR_LANGUAGE: z.string().default('tw'),
+  KHAYA_TTS_LANGUAGE: z.string().default('twi'),
+  KHAYA_TTS_SPEAKER_ID: z.string().default('male_low'),
 
   ANTHROPIC_API_KEY: z.string().min(1),
 
@@ -40,14 +43,6 @@ const envSchema = z.object({
 
   NEXT_PUBLIC_SENTRY_DSN: z.string().url().optional(),
   NEXT_PUBLIC_WS_URL: z.string().default("http://localhost:3001"),
-}).superRefine((env, ctx) => {
-  if (!env.TWILIO_WEBHOOK_BASE && !env.TWILIO_WEBHOOK_BASE_URL) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["TWILIO_WEBHOOK_BASE"],
-      message: "TWILIO_WEBHOOK_BASE or TWILIO_WEBHOOK_BASE_URL is required",
-    });
-  }
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -93,12 +88,8 @@ export const requiredVars: { key: keyof Env; description: string }[] = [
   { key: "NEXT_PUBLIC_SUPABASE_URL", description: "Supabase project URL" },
   { key: "NEXT_PUBLIC_SUPABASE_ANON_KEY", description: "Supabase anonymous key (safe for client)" },
   { key: "SUPABASE_SERVICE_ROLE_KEY", description: "Supabase service role key (server-only)" },
-  { key: "TWILIO_ACCOUNT_SID", description: "Twilio account SID" },
-  { key: "TWILIO_AUTH_TOKEN", description: "Twilio auth token" },
-  { key: "TWILIO_PHONE_NUMBER", description: "Twilio outbound phone number" },
-  { key: "TWILIO_WEBHOOK_BASE", description: "Public base URL for Twilio webhooks (ngrok/production)" },
-  { key: "SERVER_WEBHOOK_BASE", description: "Public base URL for bridge media WebSocket (optional if same host)" },
-  { key: "DEEPGRAM_API_KEY", description: "Deepgram API key" },
+  { key: 'GEMINI_API_KEY', description: 'Google Gemini API key (negotiation brain)' },
+  { key: 'VAPI_API_KEY', description: 'Vapi API key (voice orchestration)' },
   { key: "ANTHROPIC_API_KEY", description: "Anthropic API key (Claude)" },
   { key: "ENCRYPTION_KEY", description: "64-char hex AES-256-GCM encryption key" },
 ];

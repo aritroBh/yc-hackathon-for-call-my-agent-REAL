@@ -40,6 +40,8 @@ export function getLocaleForLanguage(lang: string | unknown): string {
   const clean = lang.toLowerCase().trim();
   if (clean === "twi" || clean === "akan" || clean === "tw-gh") return "tw-GH";
   if (clean === "yoruba" || clean === "yo-ng") return "yo-NG";
+  if (clean === "hindi" || clean === "hi" || clean === "hi-in") return "hi-IN";
+  if (clean === "tamil" || clean === "si-in") return "si-IN";
   return "en-US";
 }
 
@@ -164,7 +166,7 @@ Confidence: ${parsed.confidence}
     await tables.reasoning_traces.insert({
       call_id: callId,
       trace_type: "live_intel_injection",
-      provider: "claude",
+      provider: "gemini",
       phase: "negotiating",
       input_data: {
         call_id: callId,
@@ -233,12 +235,19 @@ export function buildNegotiationPromptForLanguage(
   });
 
   let prompt = builderOutput.systemPrompt;
-  if (dialectContext?.locale === "tw-GH" || dialectContext?.locale === "yo-NG") {
-    const languageName = dialectContext.locale === "tw-GH" ? "Twi / Akan" : "Yoruba";
+  const nativeLanguages: Record<string, string> = {
+    "tw-GH": "Twi / Akan",
+    "yo-NG": "Yoruba",
+    "hi-IN": "Hindi",
+    "si-IN": "Tamil / South Indian English",
+  };
+  const langName = dialectContext?.locale ? nativeLanguages[dialectContext.locale] : null;
+  if (langName) {
+    const isHindi = dialectContext?.locale === "hi-IN";
     prompt =
-      `LANGUAGE INSTRUCTION: You MUST speak exclusively in ${languageName} throughout this call.
+      `LANGUAGE INSTRUCTION: You MUST speak exclusively in ${langName} throughout this call.
 Do not translate to English. Do not code-switch unless the supplier does first.
-Use natural, fluent ${languageName} including idioms, proverbs, and culturally appropriate phrases.
+Use natural, fluent ${langName} including ${isHindi ? "Hindi idioms, 'ji' honorific, indirect phrasing" : "idioms, proverbs, and culturally appropriate phrases"}.
 Your goal is to make the supplier feel they are speaking with someone who genuinely knows their culture.
 
 ` + prompt;
@@ -262,7 +271,7 @@ export type NegotiationTurnEvent =
 
 /**
  * Run one negotiation turn. Loads RFQ/supplier/call context, runs intel,
- * builds the dialect-aware system prompt, streams Claude Opus, handles the
+ * builds the dialect-aware system prompt, streams Gemini, handles the
  * `mark_complete` tool, persists transcript turns + socket events.
  *
  * Yields incremental `delta` text events, then a final `done` event.
@@ -279,7 +288,10 @@ export async function* runNegotiationTurn(
   const supplier = call ? await getSupplierById(call.supplier_id) : null;
 
   if (!call || !rfq || !supplier) {
-    throw new Error("Negotiation context not found");
+    console.error("[negotiation] context not found for hagglCallId:", hagglCallId);
+    yield { type: "delta", text: "..." };
+    yield { type: "done", hangup: false };
+    return;
   }
 
   // Per-call live history (see liveHistory note above) — NOT the seeded
@@ -474,5 +486,34 @@ export async function finalizeCall(hagglCallId: string): Promise<void> {
       rfqId: call.rfq_id,
       status: "completed",
     });
+
+    // Fire-and-forget: run Haiku extraction, which cascades into scoring +
+    // sponsor actions (AgentMail, Sponge). Real calls only reach results via
+    // this path; don't block the Vapi webhook on it.
+    void (async () => {
+      try {
+        const fullCall = await getCallById(hagglCallId);
+        if (!fullCall?.rfq_id) return;
+        const [supplier, rfq] = await Promise.all([
+          getSupplierById(fullCall.supplier_id),
+          getRFQById(fullCall.rfq_id),
+        ]);
+        if (!supplier || !rfq) return;
+        const { extractCallData, buildTranscriptText } = await import(
+          "@/lib/aggregator"
+        );
+        await extractCallData({
+          callId: hagglCallId,
+          supplierId: fullCall.supplier_id,
+          supplierName: supplier.name,
+          transcriptText: buildTranscriptText(
+            (fullCall.transcript as any[]) || []
+          ),
+          rfqContext: rfq.title,
+        });
+      } catch (err: any) {
+        console.error("[finalizeCall] extraction failed:", err?.message);
+      }
+    })();
   }
 }

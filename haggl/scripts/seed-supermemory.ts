@@ -84,19 +84,42 @@ const LANGUAGE_MEMORIES = [
 
   // HINDI — INDIA
   {
-    content: `Hindi is the primary business language in North India: Delhi, Uttar Pradesh, Rajasthan, Gujarat (mixed), and manufacturing hubs like Ludhiana, Surat, and Kanpur. Key negotiation phrases: "Namaste ji" (respectful greeting), "Kya aap thoda aur kam kar sakte hain?" (can you reduce a little more?), "Yeh price thoda zyada hai" (this price is a bit high), "Hum bahut bada order denge" (we will give a very large order), "Dhanyavaad" (thank you), "Phir milenge" (we will meet again).`,
+    content: `Hindi negotiation phrases: "Namaste ji" (greeting), "Dhanyavaad ji" (thank you),
+"Kripya" (please), "Yeh mulya thoda zyada hai" (this price is a bit high),
+"Kya aap thoda aur kam kar sakte hain?" (can you reduce more?),
+"Hum bahut bada order denge" (we will give a very large order),
+"Yeh thoda mushkil hai" (this is a bit difficult — polite no),
+"Phir milenge" (we will meet again).`,
     metadata: { locale: 'hi-IN', category: 'phrases' },
   },
   {
-    content: `Hindi/Indian negotiation culture: relationship-first but more transactional than West Africa. "Ji" suffix shows respect (e.g., "Aap ji"). Address as "Sahab" (Sir) or "Madam ji". Negotiating is expected — never accept first price. Volume commitments unlock best prices. Seasonal demand matters: avoid negotiating during Diwali (Oct-Nov) and Holi (March). GST compliance questions are common. Payment terms: advance 30-50% is standard, rest on delivery.`,
+    content: `Hindi negotiation culture: relationship-first but more transactional than West Africa.
+Use "ji" suffix always (Rajesh ji, Kumar ji). Never use first name alone — disrespectful.
+Bargaining is expected — never accept first price.
+Volume commitments unlock best prices: "hum regular order denge" (we will give regular orders).
+Avoid Diwali (Oct-Nov) and Holi (March).
+Payment: 30-50% advance is standard in Indian B2B.
+Decision may involve multiple family members in family businesses.`,
     metadata: { locale: 'hi-IN', category: 'culture' },
   },
   {
-    content: `India manufacturing context: Ludhiana = woolen goods, hosiery. Surat = synthetic textiles, sarees. Tiruppur = knitwear, t-shirts. Kanpur = leather. For textiles, BIS (Bureau of Indian Standards) certification matters for quality. FIEO (Federation of Indian Export Organisations) members are vetted exporters. Typical lead times: 45-60 days for custom orders, 15-30 for stock items. Payment rails: wire transfer (SWIFT), Western Union for smaller amounts.`,
+    content: `India textile manufacturing hubs 2026: Ludhiana (woolen, hosiery),
+Surat (synthetic textiles, sarees), Tiruppur (knitwear, t-shirts),
+Kanpur (leather), Panipat (blankets, recycled textiles).
+Key certifications: OEKO-TEX Standard 100 (quality), BIS (Bureau of Indian Standards),
+GOTS (organic), SA8000 (labor). FIEO membership = vetted exporter.
+Typical lead times: 45-60 days custom, 15-30 days stock items.
+Payment: SWIFT wire transfer, Western Union for smaller amounts.`,
     metadata: { locale: 'hi-IN', category: 'business_context' },
   },
   {
-    content: `Hindi negotiation tactics: "Yaar, itna toh nahi hoga" (friend, that much won't work) — casual pressure. "Dekho, hum aapke saath bahut kaam karna chahte hain" (look, we want to do a lot of business with you) — relationship leverage. Reference other suppliers: "Doosri jagah se $X mein aa raha hai" (it's coming for $X from elsewhere). Hindi suppliers respond well to long-term partnership framing over single-order pressure.`,
+    content: `Hindi supplier negotiation tactics that work:
+"Yaar, itna toh nahi hoga" (friend, that much won't work) — casual pressure.
+"Hum aapke saath bahut kaam karna chahte hain" — relationship leverage.
+Reference competitor: "Doosri jagah se $X mein aa raha hai" (it's $X elsewhere).
+Volume anchor: "Agar quality achhi rahi toh hum Q2 Q3 bhi denge" (if quality is good we'll do Q2 Q3 too).
+Always confirm: "Kya main email kar sakta hoon aapko?" (can I email you?).
+Indian suppliers respond very well to long-term commitment over spot orders.`,
     metadata: { locale: 'hi-IN', category: 'tactics' },
   },
 
