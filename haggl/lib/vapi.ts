@@ -72,6 +72,11 @@ export async function createVapiAssistant(
     server: { url: `${APP_URL}/api/vapi/webhook` },
     metadata: { haggl_call_id: params.hagglCallId },
     endCallFunctionEnabled: false,
+    // Reduce echo-driven FALSE barge-in on Vapi's side while still allowing a
+    // real interruption: require a couple of words / a beat of voice before
+    // the agent stops, and denoise the inbound customer audio.
+    backgroundDenoisingEnabled: true,
+    stopSpeakingPlan: { numWords: 2, voiceSeconds: 0.3, backoffSeconds: 1.5 },
     // Vapi counts silence from the last USER utterance; Khaya batch ASR/TTS
     // + a long agent turn can exceed 30s between user turns. Keep it high so
     // the call doesn't hang up mid-negotiation.
