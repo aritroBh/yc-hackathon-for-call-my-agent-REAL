@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { motion } from "motion/react";
 import { useAtlas } from "@/lib/store";
 import { useShallow } from "zustand/react/shallow";
@@ -18,26 +19,30 @@ const COLS = [
 
 export function LedgerTable() {
   const rows = useAtlas(useShallow(selectLedgerRows));
+  const [openId, setOpenId] = useState<string | null>(null);
 
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-surface">
       <div className="flex items-center border-b border-border bg-surface-2 px-5 py-3">
-        {COLS.map((c) => (
+        {COLS.map((c, i) => (
           <span
-            key={c.label || "spacer"}
+            key={c.label || `spacer-${i}`}
             className={`font-mono text-[10px] tracking-[0.1em] text-ink-3 ${c.className}`}
           >
             {c.label}
           </span>
         ))}
       </div>
-      <motion.div
-        variants={staggerParent}
-        initial="initial"
-        animate="animate"
-      >
+      <motion.div variants={staggerParent} initial="initial" animate="animate">
         {rows.map((row) => (
-          <LedgerRow key={row.callId} row={row} />
+          <LedgerRow
+            key={row.callId}
+            row={row}
+            open={openId === row.callId}
+            onToggle={() =>
+              setOpenId((cur) => (cur === row.callId ? null : row.callId))
+            }
+          />
         ))}
       </motion.div>
     </div>

@@ -41,7 +41,7 @@ export interface AtlasState {
   chat: ChatSlice;
 
   /** The single live-data entry point. Mock simulator AND a real
-   *  Vapi/WebSocket bridge both call this — nothing else mutates calls. */
+   *  Vapi/WebSocket bridge both call this - nothing else mutates calls. */
   ingestEvent: (e: LiveCallEvent) => void;
   tick: (deltaSeconds: number) => void;
 
@@ -140,13 +140,79 @@ export const useAtlas = create<AtlasState>((set, get) => ({
 
       case "negotiation_result": {
         const result = d.result as NegotiationResult;
+        const calls = patchCall(state, e.call_id, {
+          status: "completed",
+          phase: "completed",
+          result,
+          ended_at: e.timestamp,
+        });
+
+        // Tie the chat to the calls: announce a new best offer, and a
+        // wrap-up once every call has reached a terminal state.
+        const TERMINAL = [
+          "completed",
+          "capped",
+          "failed",
+          "no-answer",
+          "busy",
+          "rejected",
+          "timeout",
+        ];
+        let prevBest = Number.POSITIVE_INFINITY;
+        for (const c of Object.values(state.calls)) {
+          const p = c.result?.quoted_price;
+          if (c.id !== e.call_id && c.status === "completed" && p != null)
+            prevBest = Math.min(prevBest, p);
+        }
+        const price = result.quoted_price;
+        const added: ChatMessage[] = [];
+        if (price != null && price < prevBest) {
+          added.push({
+            id: `a_best_${e.call_id}`,
+            role: "agent",
+            content: `New best - ${result.supplier_name} agreed to $${price.toFixed(2)}/unit${
+              result.delivery_timeline ? `, ${result.delivery_timeline}` : ""
+            }.`,
+            timestamp: e.timestamp,
+          });
+        }
+        const allCalls = Object.values(calls);
+        const allDone =
+          allCalls.length > 0 &&
+          allCalls.every((c) => TERMINAL.includes(c.status));
+        if (allDone) {
+          let bp = Number.POSITIVE_INFINITY;
+          let bn = "";
+          for (const c of allCalls) {
+            const p = c.result?.quoted_price;
+            if (c.status === "completed" && p != null && p < bp) {
+              bp = p;
+              bn = c.result?.supplier_name ?? "";
+            }
+          }
+          added.push({
+            id: `a_wrap_${Date.now()}`,
+            role: "agent",
+            content:
+              bn === ""
+                ? "All calls are done - no supplier met your cap. Want me to widen the search?"
+                : `All 6 calls done. Best deal: $${bp.toFixed(2)}/unit with ${bn}. Want me to lock it in?`,
+            timestamp: e.timestamp,
+          });
+        }
+
         set({
-          calls: patchCall(state, e.call_id, {
-            status: "completed",
-            phase: "completed",
-            result,
-            ended_at: e.timestamp,
-          }),
+          calls,
+          chat:
+            added.length === 0
+              ? state.chat
+              : {
+                  ...state.chat,
+                  messages: [...state.chat.messages, ...added],
+                  unread: state.chat.expanded
+                    ? state.chat.unread
+                    : state.chat.unread + added.length,
+                },
         });
         break;
       }
@@ -228,7 +294,7 @@ export const useAtlas = create<AtlasState>((set, get) => ({
             id: `a_start_${Date.now()}`,
             role: "agent",
             content:
-              "On it — I'm dialing all 6 suppliers now and negotiating live. Watch the deals come in.",
+              "On it - I'm dialing all 6 suppliers now and negotiating live. Watch the deals come in.",
             timestamp: new Date().toISOString(),
           },
         ],
