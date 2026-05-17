@@ -53,6 +53,10 @@ io.on("connection", (socket) => {
     io.emit("call_status_changed", data);
   });
 
+  socket.on("transcript_delta", (data) => {
+    io.emit("transcript_delta", data);
+  });
+
   socket.on("reasoning_trace", (data) => {
     io.emit("reasoning_trace", data);
   });

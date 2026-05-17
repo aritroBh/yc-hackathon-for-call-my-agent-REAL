@@ -45,8 +45,33 @@ export async function POST(req: Request): Promise<Response> {
     return pcmResponse(silence(requestedRate));
   }
 
+  // Resolve TTS language from the supplier on this call. Vapi passes the
+  // HAGGL call id as ?hcid=… (see lib/vapi.ts voiceUrl).
+  const hcid = new URL(req.url).searchParams.get("hcid") || "";
+  let ttsLanguage = process.env.KHAYA_TTS_LANGUAGE || "twi";
+  if (hcid) {
+    try {
+      const { getCallById, getSupplierById } = await import("@/lib/db");
+      const call = await getCallById(hcid);
+      const supplier = call ? await getSupplierById(call.supplier_id) : null;
+      const lang = (supplier?.metadata as any)?.language || "twi";
+      if (lang === "yoruba") {
+        // GhanaNLP Khaya has no Yoruba TTS. Degrade to the Twi voice (the
+        // LLM still negotiates in Yoruba) until Yoruba voice support lands.
+        console.log(
+          "[voice] Yoruba call — Khaya has no Yoruba TTS; using Twi voice (acceptable degradation)",
+        );
+        ttsLanguage = "twi";
+      } else if (lang === "akan" || lang === "twi") {
+        ttsLanguage = "twi";
+      }
+    } catch {
+      /* best-effort — never break the call over a language lookup */
+    }
+  }
+
   try {
-    const wav = await khayaSynthesize(message.text);
+    const wav = await khayaSynthesize(message.text, { language: ttsLanguage });
     const { pcm, sampleRate, channels, audioFormat, bitsPerSample } = stripWavHeader(wav, 16000);
 
     // Khaya TTS returns 32-bit IEEE float; Vapi needs 16-bit signed PCM.

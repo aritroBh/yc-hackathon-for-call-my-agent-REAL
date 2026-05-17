@@ -55,6 +55,12 @@ Claude Opus watches every supplier transcript turn in real time. When a supplier
 
 ---
 
+## Known Limitations
+
+- **Yoruba voice:** GhanaNLP Khaya does not yet offer Yoruba ASR/TTS. Yoruba calls use the Twi voice while the LLM still negotiates with Yoruba prompting. Full Yoruba voice support is pending GhanaNLP language expansion.
+
+---
+
 ## Quick Start
 
 ```bash

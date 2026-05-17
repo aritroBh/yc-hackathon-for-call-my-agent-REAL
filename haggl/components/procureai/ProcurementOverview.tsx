@@ -5,7 +5,7 @@
 // supplier call list. No display serifs.
 
 import { useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Icon } from "./icons";
 import { Popover } from "./Popover";
 import { SUPPLIERS, BRIEF, type Supplier, type CallState } from "./data";
@@ -164,11 +164,11 @@ function BriefPopover() {
         Procurement brief
       </div>
       <div style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.6 }}>
-        <Row k="Product" v="Raw cotton, Grade A staple length" />
-        <Row k="Region" v="India" />
-        <Row k="Quantity" v="10,000 kg" />
-        <Row k="Target price" v="$1.80 / kg" highlight />
-        <Row k="Walk-away" v="$2.20 / kg" />
+        <Row k="Product" v="Traditional woven kente fabric (48in)" />
+        <Row k="Region" v="West Africa (Ghana / Nigeria)" />
+        <Row k="Quantity" v="5,000 yards" />
+        <Row k="Target price" v="$8.50 / yard" highlight />
+        <Row k="Walk-away" v="$10.00 / yard" />
         <Row k="Deadline" v={BRIEF.deadline} />
         <Row k="Negotiation" v="Balanced" />
       </div>
@@ -181,12 +181,12 @@ function BriefPopover() {
 
 function ActivityPopover() {
   const items: { time: string; accent: string | null; text: ReactNode }[] = [
-    { time: "09:42", accent: "var(--clay-500)", text: <>Placed call to <b>Coimbatore Cotton Mills</b> in Tamil.</> },
-    { time: "09:39", accent: "var(--green-500)", text: <>Extracted quote <b>$1.74/kg</b> from Surat — 3.3% under target.</> },
-    { time: "09:31", accent: null, text: <>Completed call with Surat in Gujarati. Sentiment positive.</> },
-    { time: "09:22", accent: null, text: <>Placed call to Surat Textile Co. (Gujarati).</> },
-    { time: "09:18", accent: null, text: <>Eshan approved shortlist (4 suppliers).</> },
-    { time: "09:04", accent: null, text: <>Shortlisted 4 of 31 suppliers from research.</> },
+    { time: "09:42", accent: "var(--clay-500)", text: <>Placed call to <b>Kofi Textiles Ltd</b> in Twi (Accra, Ghana).</> },
+    { time: "09:38", accent: "var(--green-500)", text: <>Live intel fired: Moss flagged kente price anchor $10/yd vs market $8.40/yd.</> },
+    { time: "09:31", accent: null, text: <>Completed call with Adebayo Manufacturing in Yoruba. Deal at $9.50/unit.</> },
+    { time: "09:22", accent: null, text: <>Placed call to Ghana Agro Exports in Akan (Kumasi).</> },
+    { time: "09:18", accent: null, text: <>Browser Use: researched Kofi Textiles — AGOA certified, GSA mark holder.</> },
+    { time: "09:04", accent: null, text: <>Supermemory: prior Kofi deal at $8.40/yd loaded into negotiation context.</> },
   ];
   return (
     <div style={{ padding: "14px 4px 8px" }}>
@@ -227,6 +227,34 @@ function ActivityPopover() {
 
 export function ProcurementOverview() {
   const router = useRouter();
+  const [demoLoading, setDemoLoading] = useState(false);
+  const [rlLoading, setRlLoading] = useState(false);
+  const [rlResult, setRlResult] = useState<string | null>(null);
+
+  const runDemo = async () => {
+    setDemoLoading(true);
+    try {
+      const r = await fetch("/api/demo/seed", { method: "POST" });
+      const d = await r.json();
+      if (d.rfqId) router.push(`/rfq/${d.rfqId}/monitor`);
+    } finally {
+      setDemoLoading(false);
+    }
+  };
+
+  const runRL = async () => {
+    setRlLoading(true);
+    try {
+      const r = await fetch("/api/rl/run", { method: "POST" });
+      const d = await r.json();
+      setRlResult(
+        d.message || `RL complete — ${d.newlyAnalyzedCount ?? 0} call(s) analyzed`,
+      );
+    } finally {
+      setRlLoading(false);
+    }
+  };
+
   const openMonitor = () => router.push("/rfq/demo/monitor");
 
   return (
@@ -247,8 +275,30 @@ export function ProcurementOverview() {
                 </span>
               </div>
               <div className="pa-page-sub" style={{ marginTop: 4 }}>
-                PR-2614 · India · 10,000 kg · deadline {BRIEF.deadline}
+                PR-2614 · West Africa (Ghana / Nigeria) · deadline {BRIEF.deadline}
               </div>
+            </div>
+
+            <div className="flex gap-2 items-center">
+              <button
+                onClick={runDemo}
+                disabled={demoLoading}
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-mono text-white disabled:opacity-50"
+              >
+                {demoLoading ? "Starting…" : "▶ Run Demo"}
+              </button>
+              <button
+                onClick={runRL}
+                disabled={rlLoading}
+                className="px-3 py-1.5 border border-emerald-700 hover:border-emerald-500 text-emerald-400 rounded text-xs font-mono disabled:opacity-50"
+              >
+                {rlLoading ? "Running…" : "⟳ Optimize Agent"}
+              </button>
+              {rlResult && (
+                <span className="text-xs text-slate-400 self-center max-w-[220px] truncate" title={rlResult}>
+                  {rlResult}
+                </span>
+              )}
             </div>
 
             <Popover
@@ -318,8 +368,8 @@ export function ProcurementOverview() {
             </div>
             <div className="pa-kpi">
               <div className="label">Languages</div>
-              <div className="value">4</div>
-              <div className="sub">GU · TA · HI · MR</div>
+              <div className="value">3</div>
+              <div className="sub">TWI · YOR · AKAN</div>
             </div>
           </div>
 
