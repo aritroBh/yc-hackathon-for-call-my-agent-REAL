@@ -6,6 +6,7 @@ import { useSocket } from "@/lib/socket";
 import CallCard from "@/components/CallCard";
 import LiveTranscriptPanel from "@/components/LiveTranscriptPanel";
 import ReasoningTracePanel from "@/components/ReasoningTracePanel";
+import SupplierHistoryPanel from "@/components/SupplierHistoryPanel";
 
 interface CallData {
   id: string;
@@ -44,7 +45,7 @@ export default function MonitorPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
-  const { connected } = useSocket();
+  const { socket, connected } = useSocket();
 
   const [rfq, setRfq] = useState<RfqData | null>(null);
   const [calls, setCalls] = useState<CallData[]>([]);
@@ -85,10 +86,18 @@ export default function MonitorPage() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   useEffect(() => {
-    if (!connected) return;
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }, [connected, fetchData]);
+    if (!socket) return;
+    
+    const handleCallStatus = (data: any) => {
+      setCalls(prev => prev.map(c => c.id === data.callId ? { ...c, status: data.status } : c));
+    };
+    
+    socket.on('call_status_changed', handleCallStatus);
+    
+    return () => {
+      socket.off('call_status_changed', handleCallStatus);
+    };
+  }, [socket]);
 
   const handleDispatch = async () => {
     setDispatching(true);
@@ -133,6 +142,9 @@ export default function MonitorPage() {
   const pendingCalls = calls.filter((c) => c.status === "pending" || c.status === "queued");
 
   const canDispatch = rfq?.status === "open" || rfq?.status === "draft";
+
+  const selectedCallData = calls.find((c) => c.id === selectedCall);
+  const selectedSupplierId = selectedCallData?.supplier_id;
 
   return (
     <div className="space-y-5">
@@ -192,6 +204,8 @@ export default function MonitorPage() {
           />
 
           <ReasoningTracePanel callId={selectedCall || undefined} />
+
+          <SupplierHistoryPanel supplierId={selectedSupplierId} />
         </div>
 
         <div className="space-y-3">

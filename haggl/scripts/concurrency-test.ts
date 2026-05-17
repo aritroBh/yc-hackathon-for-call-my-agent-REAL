@@ -79,7 +79,7 @@ async function runConcurrencyTest() {
   const startTime = Date.now();
 
   while (completedCount + failedCount < totalCalls) {
-    const entry = queue.dequeue();
+    const entry = await queue.dequeue();
 
     if (entry) {
       assert(

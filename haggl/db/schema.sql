@@ -325,6 +325,54 @@ BEGIN
 END;
 $$;
 
+-- ── Table: dispatch_sessions ────────────────────────
+
+CREATE TABLE dispatch_sessions (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  rfq_id          UUID NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
+  organization_id UUID NOT NULL,
+  status          TEXT NOT NULL,
+  total_suppliers INTEGER NOT NULL DEFAULT 0,
+  dispatched      INTEGER NOT NULL DEFAULT 0,
+  completed       INTEGER NOT NULL DEFAULT 0,
+  failed          INTEGER NOT NULL DEFAULT 0,
+  started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at    TIMESTAMPTZ
+);
+
+CREATE INDEX idx_dispatch_sessions_rfq ON dispatch_sessions(rfq_id);
+CREATE INDEX idx_dispatch_sessions_org ON dispatch_sessions(organization_id);
+
+CREATE TRIGGER trg_dispatch_sessions_updated_at
+  BEFORE UPDATE ON dispatch_sessions
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ── Table: queue_entries ────────────────────────────
+
+CREATE TABLE queue_entries (
+  call_id         UUID PRIMARY KEY REFERENCES calls(id) ON DELETE CASCADE,
+  rfq_id          UUID NOT NULL REFERENCES rfqs(id) ON DELETE CASCADE,
+  supplier_id     UUID NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+  supplier_name   TEXT NOT NULL,
+  phone           TEXT NOT NULL,
+  priority        INTEGER NOT NULL DEFAULT 0,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  attempt         INTEGER NOT NULL DEFAULT 0,
+  max_attempts    INTEGER NOT NULL DEFAULT 1,
+  error           TEXT,
+  queued_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_at      TIMESTAMPTZ,
+  completed_at    TIMESTAMPTZ,
+  twilio_call_sid TEXT
+);
+
+CREATE INDEX idx_queue_entries_status ON queue_entries(status);
+CREATE INDEX idx_queue_entries_priority ON queue_entries(status, priority DESC);
+
+CREATE TRIGGER trg_queue_entries_updated_at
+  BEFORE UPDATE ON queue_entries
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
 -- ── Row-Level Security ──────────────────────────────
 
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
@@ -335,6 +383,8 @@ ALTER TABLE rfq_suppliers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE calls ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reasoning_traces ENABLE ROW LEVEL SECURITY;
 ALTER TABLE feedback ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dispatch_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE queue_entries ENABLE ROW LEVEL SECURITY;
 
 -- Service-role bypass policies (app server uses service_role key)
 CREATE POLICY service_role_all_users ON users FOR ALL USING (true) WITH CHECK (true);
@@ -345,5 +395,7 @@ CREATE POLICY service_role_all_rfq_suppliers ON rfq_suppliers FOR ALL USING (tru
 CREATE POLICY service_role_all_calls ON calls FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY service_role_all_reasoning_traces ON reasoning_traces FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY service_role_all_feedback ON feedback FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY service_role_all_dispatch_sessions ON dispatch_sessions FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY service_role_all_queue_entries ON queue_entries FOR ALL USING (true) WITH CHECK (true);
 
 COMMIT;

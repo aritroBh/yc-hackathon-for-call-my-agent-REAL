@@ -176,21 +176,25 @@ export async function extractNegotiationPatterns(
     && !input.extraction;
 
   try {
-    const prompt = (isFailure ? FAILURE_PATTERN_PROMPT : PATTERN_EXTRACTION_PROMPT)
-      .replace("{{supplierName}}", input.supplierName)
-      .replace("{{region}}", input.region || "Unknown")
-      .replace("{{dialectLocale}}", input.dialectLocale || "Unknown")
-      .replace("{{transcript}}", input.transcriptText)
-      .replace("{{quotedPrice}}", input.extraction?.quoted_price != null ? String(input.extraction.quoted_price) : "N/A")
-      .replace("{{leadTimeDays}}", input.extraction?.lead_time_days != null ? String(input.extraction.lead_time_days) : "N/A")
-      .replace("{{certifications}}", input.extraction?.certifications?.join(", ") || "N/A")
-      .replace("{{moq}}", input.extraction?.minimum_order_quantity != null ? String(input.extraction.minimum_order_quantity) : "N/A")
-      .replace("{{commQuality}}", input.extraction?.communication_quality != null ? String(input.extraction.communication_quality) : "N/A")
-      .replace("{{negEffectiveness}}", input.extraction?.negotiation_effectiveness != null ? String(input.extraction.negotiation_effectiveness) : "N/A")
-      .replace("{{extractionConfidence}}", input.extraction?.confidence != null ? String(input.extraction.confidence) : "N/A")
-      .replace("{{feedbackRating}}", input.feedbackRating != null ? String(input.feedbackRating) : "N/A")
-      .replace("{{feedbackComment}}", input.feedbackComment || "")
-      .replace("{{extractionError}}", input.extractionError || "None");
+    const safeReplace = (text: string, target: string, value: string | null | undefined) => {
+      return text.replace(target, value ? String(value) : "Not specified");
+    };
+
+    let prompt = isFailure ? FAILURE_PATTERN_PROMPT : PATTERN_EXTRACTION_PROMPT;
+    prompt = safeReplace(prompt, "{{supplierName}}", input.supplierName);
+    prompt = safeReplace(prompt, "{{region}}", input.region);
+    prompt = safeReplace(prompt, "{{dialectLocale}}", input.dialectLocale);
+    prompt = safeReplace(prompt, "{{transcript}}", input.transcriptText);
+    prompt = safeReplace(prompt, "{{quotedPrice}}", input.extraction?.quoted_price != null ? String(input.extraction.quoted_price) : null);
+    prompt = safeReplace(prompt, "{{leadTimeDays}}", input.extraction?.lead_time_days != null ? String(input.extraction.lead_time_days) : null);
+    prompt = safeReplace(prompt, "{{certifications}}", input.extraction?.certifications?.join(", "));
+    prompt = safeReplace(prompt, "{{moq}}", input.extraction?.minimum_order_quantity != null ? String(input.extraction.minimum_order_quantity) : null);
+    prompt = safeReplace(prompt, "{{commQuality}}", input.extraction?.communication_quality != null ? String(input.extraction.communication_quality) : null);
+    prompt = safeReplace(prompt, "{{negEffectiveness}}", input.extraction?.negotiation_effectiveness != null ? String(input.extraction.negotiation_effectiveness) : null);
+    prompt = safeReplace(prompt, "{{extractionConfidence}}", input.extraction?.confidence != null ? String(input.extraction.confidence) : null);
+    prompt = safeReplace(prompt, "{{feedbackRating}}", input.feedbackRating != null ? String(input.feedbackRating) : null);
+    prompt = safeReplace(prompt, "{{feedbackComment}}", input.feedbackComment);
+    prompt = safeReplace(prompt, "{{extractionError}}", input.extractionError);
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",

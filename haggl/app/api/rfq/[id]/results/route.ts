@@ -3,8 +3,6 @@ import { getRFQById, listCallsByRFQ, getSupplierById, getDecryptedFloorPrice } f
 import {
   extractCallData,
   buildTranscriptText,
-  getCachedExtraction,
-  setCachedExtraction,
   type CallExtraction,
 } from "@/lib/aggregator";
 import {
@@ -23,6 +21,7 @@ export interface AggregatedResultsResponse {
   total_calls: number;
   successful_calls: number;
   failed_calls: number;
+  total_cost_millicents: number;
   suppliers_contacted: number;
   suppliers_responded: number;
   best_price: number | null;
@@ -80,6 +79,7 @@ export async function GET(
       total_calls: calls.length,
       successful_calls: 0,
       failed_calls: failed.length,
+      total_cost_millicents: calls.reduce((acc, c) => acc + (c.cost_millicents || 0), 0),
       suppliers_contacted: new Set(calls.map((c) => c.supplier_id)).size,
       suppliers_responded: 0,
       best_price: null,
@@ -109,10 +109,6 @@ export async function GET(
     };
 
     const extractionPromises = successful.map(async (call) => {
-      const cacheKey = "extract:" + call.id;
-      const cached = getCachedExtraction(cacheKey);
-      if (cached) return cached;
-
       const supplier = await getSupplierById(call.supplier_id);
       const supplierName = supplier?.name || "Unknown Supplier";
       const transcriptText = buildTranscriptText(call.transcript || []);
@@ -126,7 +122,10 @@ export async function GET(
         rfqContext,
       });
 
-      setCachedExtraction(cacheKey, result);
+      // Inject cost and duration into the extraction
+      (result as any).call_cost_millicents = call.cost_millicents;
+      (result as any).duration_seconds = call.duration_seconds;
+
       return result;
     });
 
@@ -180,6 +179,7 @@ export async function GET(
       total_calls: calls.length,
       successful_calls: successful.length,
       failed_calls: failed.length,
+      total_cost_millicents: calls.reduce((acc, c) => acc + (c.cost_millicents || 0), 0),
       suppliers_contacted: new Set(calls.map((c) => c.supplier_id)).size,
       suppliers_responded: seenSuppliers.size,
       best_price: bestPrice,

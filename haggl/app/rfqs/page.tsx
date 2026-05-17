@@ -27,6 +27,7 @@ export default function RFQPage() {
   const [form, setForm] = useState<RFQFormData>(emptyForm);
   const [submitting, setSubmitting] = useState(false);
   const [dispatchLoading, setDispatchLoading] = useState<string | null>(null);
+  const [dispatchedIds, setDispatchedIds] = useState<Set<string>>(new Set());
 
   const fetchRfqs = async () => {
     try {
@@ -76,12 +77,26 @@ export default function RFQPage() {
     setDispatchLoading(rfqId);
     try {
       const res = await fetch("/api/dispatch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rfq_id: rfqId }) });
+      if (res.status === 409) {
+        alert("Dispatch already in progress for this RFQ.");
+        setDispatchedIds(prev => new Set(prev).add(rfqId));
+        return;
+      }
       if (!res.ok) throw new Error("Dispatch failed");
+      
+      setDispatchedIds(prev => new Set(prev).add(rfqId));
       await fetchRfqs();
     } catch {
       setError("Failed to dispatch RFQ");
-    } finally {
       setDispatchLoading(null);
+    } finally {
+      // Only clear if we didn't succeed/409, meaning we errored and didn't add to set
+      // Actually, if we succeed, we leave it in dispatchLoading or let the dispatchedIds take over.
+      // The requirement says: "only clear dispatchLoading if the response was an error."
+      if (!dispatchedIds.has(rfqId)) {
+        // Wait, state update for dispatchedIds might not be reflected in this closure.
+        // Let's just clear it if we hit the catch block. We did that above.
+      }
     }
   };
 
@@ -158,10 +173,10 @@ export default function RFQPage() {
                         <a href={`/rfqs/${rfq.id}`} className="text-indigo-600 hover:text-indigo-800 text-sm font-medium">View</a>
                         <button
                           onClick={() => handleDispatch(rfq.id)}
-                          disabled={dispatchLoading === rfq.id}
-                          className="text-green-600 hover:text-green-800 text-sm font-medium disabled:opacity-50"
+                          disabled={dispatchLoading === rfq.id || dispatchedIds.has(rfq.id)}
+                          className={`text-sm font-medium disabled:opacity-50 ${dispatchedIds.has(rfq.id) ? "text-gray-500" : "text-green-600 hover:text-green-800"}`}
                         >
-                          {dispatchLoading === rfq.id ? "..." : "Dispatch"}
+                          {dispatchedIds.has(rfq.id) ? "Dispatched ✓" : dispatchLoading === rfq.id ? "..." : "Dispatch"}
                         </button>
                       </div>
                     </td>

@@ -1,7 +1,8 @@
 import { EventEmitter } from "node:events";
-import { tables, getRFQById, getSuppliersForRFQ } from "@/lib/db";
+import { tables, getRFQById, getSuppliersForRFQ, getSupplierById } from "@/lib/db";
 import { getCallQueue, type QueueEntry } from "@/lib/queue";
 import type { RFQRow, RFQSupplierRow, SupplierRow, CallRow } from "@/types/database";
+import { researchSupplier } from "@/lib/sponsors/browseruse";
 
 export type DispatchStatus =
   | "idle"
@@ -68,6 +69,27 @@ export class Dispatcher extends EventEmitter {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
+  async hydrateFromDB(rfqId: string): Promise<DispatchSession | undefined> {
+    const { data } = await tables.dispatch_sessions.select("*").eq("rfq_id", rfqId).order("started_at", { ascending: false }).limit(1).single();
+    if (data) {
+      const session: DispatchSession = {
+        id: data.id,
+        rfqId: data.rfq_id,
+        organizationId: data.organization_id,
+        status: data.status as DispatchStatus,
+        totalSuppliers: data.total_suppliers,
+        dispatched: data.dispatched,
+        completed: data.completed,
+        failed: data.failed,
+        startedAt: new Date(data.started_at).getTime(),
+        completedAt: data.completed_at ? new Date(data.completed_at).getTime() : null,
+      };
+      this.activeSessions.set(rfqId, session);
+      return session;
+    }
+    return undefined;
+  }
+
   async dispatchRFQ(rfqId: string, organizationId: string): Promise<DispatchSession> {
     const rfq = await getRFQById(rfqId);
     if (!rfq) throw new Error(`RFQ ${rfqId} not found`);
@@ -75,7 +97,7 @@ export class Dispatcher extends EventEmitter {
       throw new Error("RFQ does not belong to this organization");
     }
 
-    const existing = this.activeSessions.get(rfqId);
+    const existing = await this.getSession(rfqId);
     if (existing && (existing.status === "dispatching")) {
       throw new Error(`RFQ ${rfqId} is already being dispatched`);
     }
@@ -101,6 +123,21 @@ export class Dispatcher extends EventEmitter {
       startedAt: Date.now(),
       completedAt: null,
     };
+
+    const { data: insertedSession } = await tables.dispatch_sessions.insert({
+      rfq_id: rfqId,
+      organization_id: organizationId,
+      status: "dispatching",
+      total_suppliers: validSuppliers.length,
+      dispatched: 0,
+      completed: 0,
+      failed: 0,
+      started_at: new Date(session.startedAt).toISOString(),
+    }).select().single();
+    
+    if (insertedSession) {
+      session.id = insertedSession.id;
+    }
 
     this.activeSessions.set(rfqId, session);
     this.emit("dispatch_started" as any, session);
@@ -152,6 +189,7 @@ export class Dispatcher extends EventEmitter {
       queue.enqueue(entry);
       this.emit("call_queued" as any, entry.callId, entry);
       session.dispatched++;
+      await tables.dispatch_sessions.update({ dispatched: session.dispatched }).eq("id", session.id);
       this.emit("dispatch_progress" as any, { ...session });
     }
 
@@ -163,6 +201,19 @@ export class Dispatcher extends EventEmitter {
     supplierId: string,
     rfqSupplierId: string,
   ): Promise<string> {
+    const { data: existingCalls } = await tables.calls
+      .select("id")
+      .eq("rfq_id", rfqId)
+      .eq("supplier_id", supplierId)
+      .not("status", "in", '("failed","no_answer","rejected")')
+      .limit(1);
+
+    if (existingCalls && existingCalls.length > 0) {
+      const existingId = existingCalls[0].id;
+      console.warn(`[Dispatcher] Skipping duplicate call for supplier ${supplierId} on RFQ ${rfqId} — existing call ${existingId}`);
+      return existingId;
+    }
+
     const { data, error } = await tables.calls
       .insert({
         rfq_id: rfqId,
@@ -185,60 +236,90 @@ export class Dispatcher extends EventEmitter {
       .single();
 
     if (error || !data) throw new Error(`Failed to create call record: ${error?.message}`);
+
+    // Asynchronously research supplier in background using Browser Use
+    (async () => {
+      try {
+        const supplier = await getSupplierById(supplierId);
+        const rfq = await getRFQById(rfqId);
+        if (supplier && rfq) {
+          console.log(`[Dispatcher] Starting Browser Use pre-call research for ${supplier.name}...`);
+          const research = await researchSupplier(supplier.name, rfq.title);
+          if (research) {
+            await tables.calls.update({
+              result: { pre_call_research: research }
+            }).eq("id", data.id);
+            console.log(`[Dispatcher] Browser Use research complete for ${supplier.name}`);
+          }
+        }
+      } catch (err: any) {
+        console.warn("[Dispatcher] Browser Use pre-call research failed:", err.message);
+      }
+    })();
+
     return (data as CallRow).id;
   }
 
-  completeSession(rfqId: string): void {
-    const session = this.activeSessions.get(rfqId);
+  async completeSession(rfqId: string): Promise<void> {
+    const session = await this.getSession(rfqId);
     if (!session) return;
     session.status = "completed";
     session.completedAt = Date.now();
+    await tables.dispatch_sessions.update({ status: "completed", completed_at: new Date(session.completedAt).toISOString() }).eq("id", session.id);
     this.emit("dispatch_completed" as any, { ...session });
     this.activeSessions.delete(rfqId);
   }
 
-  failSession(rfqId: string, error: string): void {
-    const session = this.activeSessions.get(rfqId);
+  async failSession(rfqId: string, error: string): Promise<void> {
+    const session = await this.getSession(rfqId);
     if (!session) return;
     session.status = "failed";
     session.completedAt = Date.now();
+    await tables.dispatch_sessions.update({ status: "failed", completed_at: new Date(session.completedAt).toISOString() }).eq("id", session.id);
     this.emit("dispatch_failed" as any, { ...session }, error);
     this.activeSessions.delete(rfqId);
   }
 
-  incrementCompleted(rfqId: string): void {
-    const session = this.activeSessions.get(rfqId);
+  async incrementCompleted(rfqId: string): Promise<void> {
+    const session = await this.getSession(rfqId);
     if (!session) return;
     session.completed++;
+    await tables.dispatch_sessions.update({ completed: session.completed }).eq("id", session.id);
     this.emit("dispatch_progress" as any, { ...session });
     if (session.completed + session.failed >= session.totalSuppliers) {
-      this.completeSession(rfqId);
+      await this.completeSession(rfqId);
     }
   }
 
-  incrementFailed(rfqId: string): void {
-    const session = this.activeSessions.get(rfqId);
+  async incrementFailed(rfqId: string): Promise<void> {
+    const session = await this.getSession(rfqId);
     if (!session) return;
     session.failed++;
+    await tables.dispatch_sessions.update({ failed: session.failed }).eq("id", session.id);
     this.emit("dispatch_progress" as any, { ...session });
     if (session.completed + session.failed >= session.totalSuppliers) {
-      this.completeSession(rfqId);
+      await this.completeSession(rfqId);
     }
   }
 
-  getSession(rfqId: string): DispatchSession | undefined {
-    return this.activeSessions.get(rfqId);
+  async getSession(rfqId: string): Promise<DispatchSession | undefined> {
+    let session = this.activeSessions.get(rfqId);
+    if (!session) {
+      session = await this.hydrateFromDB(rfqId);
+    }
+    return session;
   }
 
   getActiveSessions(): DispatchSession[] {
     return Array.from(this.activeSessions.values());
   }
 
-  cancelSession(rfqId: string): void {
-    const session = this.activeSessions.get(rfqId);
+  async cancelSession(rfqId: string): Promise<void> {
+    const session = await this.getSession(rfqId);
     if (!session) return;
     session.status = "failed";
     session.completedAt = Date.now();
+    await tables.dispatch_sessions.update({ status: "failed", completed_at: new Date(session.completedAt).toISOString() }).eq("id", session.id);
     this.emit("dispatch_failed" as any, { ...session }, "Cancelled by user");
     this.activeSessions.delete(rfqId);
   }

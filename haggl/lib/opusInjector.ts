@@ -15,6 +15,10 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 import { shouldTrigger } from './triggerDetection'
+import { tables } from '@/lib/db'
+import { getSocketServer } from '@/lib/socket'
+import { searchMossForContext } from '@/lib/sponsors/moss'
+import { getSupplierMemory } from '@/lib/sponsors/supermemory'
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -53,6 +57,8 @@ export interface OpusInjectorOptions {
   injectText: (text: string) => void
   /** Static context about what is being negotiated. */
   negotiationContext: NegotiationContext
+  /** Call ID this injector is attached to. */
+  callId: string
 }
 
 // ── OpusInjector ───────────────────────────────────────────────────
@@ -61,6 +67,7 @@ export class OpusInjector {
   private readonly anthropic: Anthropic
   private readonly injectText: (text: string) => void
   private readonly context: NegotiationContext
+  private readonly callId: string
 
   private active = false
   private processing = false
@@ -69,13 +76,35 @@ export class OpusInjector {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null
   private traceCount = 0
 
+  private supplierName: string | null = null;
+  private preCallResearch: any = null;
+  private supplierRegion: string = "US East";
+
   constructor(opts: OpusInjectorOptions) {
     this.injectText = opts.injectText
     this.context = opts.negotiationContext
+    this.callId = opts.callId
 
     const apiKey = process.env.ANTHROPIC_API_KEY
     if (!apiKey) throw new Error('[OpusInjector] ANTHROPIC_API_KEY is not set')
     this.anthropic = new Anthropic({ apiKey })
+  }
+
+  private async ensureSupplierDetails() {
+    if (this.supplierName) return;
+    try {
+      const { data: callData } = await tables.calls.select("*").eq("id", this.callId).single();
+      if (callData) {
+        this.preCallResearch = callData.result?.pre_call_research || null;
+        const { data: supplierData } = await tables.suppliers.select("*").eq("id", callData.supplier_id).single();
+        if (supplierData) {
+          this.supplierName = supplierData.name;
+          this.supplierRegion = (supplierData.metadata?.region as string) || "US East";
+        }
+      }
+    } catch (err) {
+      console.warn("[OpusInjector] failed to load supplier details:", err);
+    }
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────
@@ -134,13 +163,36 @@ export class OpusInjector {
     this.processing = true
     const start = Date.now()
 
+    await this.ensureSupplierDetails();
+
+    // 1. Query Moss Semantic Search
+    const mossContext = await searchMossForContext(triggerText);
+    const mossFactsStr = mossContext?.facts && mossContext.facts.length > 0
+      ? "VERIFIED MARKET FACTS (from Moss semantic search):\n" + mossContext.facts.map(f => `- ${f}`).join("\n") + "\n\n"
+      : "";
+
+    // 2. Query Supermemory Negotiation History
+    let supermemoryStr = "";
+    if (this.supplierName) {
+      const memories = await getSupplierMemory(this.supplierName, this.supplierRegion);
+      if (memories) {
+        supermemoryStr = "HISTORICAL SUPPLIER INTELLIGENCE (from past negotiations):\n" + memories + "\n\n";
+      }
+    }
+
+    // 3. Pre-call Browser Use Research
+    let browserUseStr = "";
+    if (this.preCallResearch) {
+      browserUseStr = "PRE-CALL RESEARCH (Browser Use):\n" + JSON.stringify(this.preCallResearch, null, 2) + "\n\n";
+    }
+
     const transcriptContext = this.buffer
       .map(t => `[${t.role.toUpperCase()}]: ${t.text}`)
       .join('\n')
 
     const prompt = `You are a procurement intelligence analyst supporting a live negotiation call.
 
-Negotiation context:
+${mossFactsStr}${supermemoryStr}${browserUseStr}Negotiation context:
 - Part: ${this.context.partName}
 - Quantity: ${this.context.quantity} units
 - Target price: $${this.context.targetPrice} ${this.context.currency}
@@ -207,6 +259,47 @@ Respond in JSON only, no markdown fences:
         ` confidence=${parsed.confidence}` +
         ` latency=${Date.now() - start}ms`
       )
+
+      const outputData = {
+        rebuttal_context: parsed.rebuttal_context,
+        facts: parsed.facts,
+        suggested_position: parsed.suggested_position,
+        confidence: parsed.confidence,
+        injected_text: intelText,
+        moss_facts: mossContext?.facts || [],
+        supermemory_context: supermemoryStr || null,
+        pre_call_research: this.preCallResearch || null,
+      };
+
+      try {
+        await tables.reasoning_traces.insert({
+          call_id: this.callId,
+          trace_type: 'live_intel_injection',
+          provider: 'claude',
+          phase: 'negotiating',
+          input_data: {
+            call_id: this.callId,
+            supplier_turn: triggerText,
+            negotiation_context: this.context,
+          },
+          output_data: outputData,
+          tokens_used: null,
+          latency_ms: Date.now() - start,
+        });
+
+        getSocketServer()?.emit('reasoning_trace', { 
+          callId: this.callId, 
+          traceType: 'live_intel_injection', 
+          data: outputData,
+          category: 'general',
+          confidence: parsed.confidence === 'high' ? 0.9 : parsed.confidence === 'medium' ? 0.5 : 0.2,
+          claim: triggerText,
+          timestamp: new Date().toISOString()
+        });
+      } catch (dbErr) {
+        console.warn('[OpusInjector] failed to save trace:', dbErr);
+      }
+
     } catch (err: any) {
       if (err?.message === 'timeout') {
         console.warn('[OpusInjector] timeout — skipped injection')

@@ -3,6 +3,7 @@ import { getCallQueue } from "@/lib/queue";
 import { getDispatcher } from "@/lib/dispatcher";
 import { createOutboundCall } from "@/lib/twilio";
 import { tables } from "@/lib/db";
+import { getSocketServer } from "@/lib/socket";
 import type { QueueEntry } from "@/lib/queue";
 import type { CallRow } from "@/types/database";
 
@@ -74,12 +75,8 @@ export class CallWorker {
     if (!this.running) return;
 
     const queue = getCallQueue();
-    if (queue.getInFlightCount() >= queue.getPendingCount() + queue.getInFlightCount()) {
-      const pending = queue.getPendingCount();
-      if (pending === 0) return;
-    }
 
-    const entry = queue.dequeue();
+    const entry = await queue.dequeue();
     if (!entry) return;
 
     const controller = new AbortController();
@@ -104,6 +101,8 @@ export class CallWorker {
         })
         .eq("id", entry.callId);
 
+      getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "queued", twilioCallSid: null });
+
       const result = await createOutboundCall(entry.phone, entry.callId, {
         record: true,
         timeoutSeconds: this.opts.callTimeoutSeconds,
@@ -119,6 +118,8 @@ export class CallWorker {
           })
           .eq("id", entry.callId);
 
+        getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "failed", twilioCallSid: null });
+
         queue.fail(entry.callId, errorMsg);
         dispatcher.incrementFailed(entry.rfqId);
         return;
@@ -133,6 +134,8 @@ export class CallWorker {
         })
         .eq("id", entry.callId);
 
+      getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "ringing", twilioCallSid: result.callSid });
+
       const callTimeoutMs = this.opts.callTimeoutSeconds * 1000;
       const timeout = setTimeout(async () => {
         const entry2 = queue.getByCallId(entry.callId);
@@ -144,6 +147,8 @@ export class CallWorker {
               ended_at: new Date().toISOString(),
             })
             .eq("id", entry.callId);
+
+          getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "no_answer", twilioCallSid: result.callSid });
 
           queue.fail(entry.callId, "No answer - timed out");
           dispatcher.incrementFailed(entry.rfqId);
@@ -167,12 +172,53 @@ export class CallWorker {
 
             if (c.status === "in_progress") {
               queue.updateStatus(entry.callId, "in_progress");
+              getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "in_progress", twilioCallSid: c.twilio_call_sid });
             } else {
               queue.complete(entry.callId);
               dispatcher.incrementCompleted(entry.rfqId);
+
+              // Calculate costs
+              let total_cost_millicents = 0;
+              let duration_seconds = 0;
+              try {
+                if (c.twilio_call_sid) {
+                  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+                  const authToken = process.env.TWILIO_AUTH_TOKEN;
+                  if (accountSid && authToken) {
+                    const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+                    const twilioRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${c.twilio_call_sid}.json`, {
+                      headers: { 'Authorization': `Basic ${auth}` }
+                    });
+                    if (twilioRes.ok) {
+                      const twilioCall = await twilioRes.json();
+                      const price = twilioCall.price ? parseFloat(twilioCall.price) : 0;
+                      const twilio_millicents = Math.round(Math.abs(price) * 100_000);
+                      duration_seconds = twilioCall.duration ? parseInt(twilioCall.duration) : 0;
+                      
+                      // Claude API cost estimate
+                      const { count: injections } = await tables.reasoning_traces
+                        .select('*', { count: 'exact', head: true })
+                        .eq('input_data->>call_id', entry.callId);
+                      
+                      const claude_millicents = Math.round(((injections || 0) * 700 * 15) / 1_000_000 * 100_000) + 50; // +50 for Haiku extraction
+                      
+                      total_cost_millicents = twilio_millicents + claude_millicents;
+                    }
+                  }
+                }
+              } catch (costErr) {
+                console.error("[CallWorker] Failed to calculate costs:", costErr);
+              }
+
               await tables.calls
-                .update({ ended_at: new Date().toISOString() })
+                .update({ 
+                  ended_at: new Date().toISOString(),
+                  ...(total_cost_millicents > 0 && { cost_millicents: total_cost_millicents }),
+                  ...(duration_seconds > 0 && { duration_seconds })
+                })
                 .eq("id", entry.callId);
+
+              getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "completed", twilioCallSid: c.twilio_call_sid });
             }
           } else if (
             ["failed", "busy", "no_answer", "rejected", "capped"].includes(
@@ -183,6 +229,7 @@ export class CallWorker {
             clearInterval(checkInterval);
             queue.fail(entry.callId, `Supplier ${c.status}`);
             dispatcher.incrementFailed(entry.rfqId);
+            getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: c.status, twilioCallSid: c.twilio_call_sid });
           }
         } catch {}
       }, 2_000);
@@ -195,6 +242,8 @@ export class CallWorker {
           ended_at: new Date().toISOString(),
         })
         .eq("id", entry.callId);
+
+      getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "failed", twilioCallSid: null });
 
       queue.fail(entry.callId, msg);
       dispatcher.incrementFailed(entry.rfqId);

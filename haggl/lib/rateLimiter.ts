@@ -1,5 +1,10 @@
 import { logger } from "@/lib/logger";
 
+// WARNING: In-memory rate limiter. Ineffective in serverless — replace with Redis before production.
+if (process.env.VERCEL && process.env.NODE_ENV === 'production') {
+  logger.warn("Using in-memory rate limiter in a serverless environment. This is ineffective.");
+}
+
 interface RateLimiterOptions {
   windowMs: number;
   maxRequests: number;

@@ -1,15 +1,14 @@
-import { getCallById, getRFQById, getSupplierById } from "@/lib/db";
-import { sendPostCallEmail } from "@/lib/sponsors/agentmail";
+import { getCallById, getRFQById, getSupplierById, listCallsByRFQ, getDecryptedFloorPrice } from "@/lib/db";
+import { sendPostCallEmail, sendBuyerPostCallEmail } from "@/lib/sponsors/agentmail";
 import { storeNegotiationMemory } from "@/lib/sponsors/supermemory";
+import { scoreSupplier, type ScoringContext } from "@/lib/scoring";
+
+import { tables } from "@/lib/db";
 
 const HAIKU_MODEL = "claude-3-5-haiku-20241022";
 const EXTRACTION_TIMEOUT_MS = 8_000;
-const EXTRACTION_CACHE_TTL_MS = 60_000;
-const SPONSOR_DISPATCH_TTL_MS = 24 * 60 * 60 * 1000;
 
 let _haikuApiKey: string | null = null;
-const extractionCache = new Map<string, { result: CallExtraction; ts: number }>();
-const sponsorDispatchCache = new Map<string, number>();
 
 function getHaikuKey(): string {
   if (!_haikuApiKey) {
@@ -236,29 +235,17 @@ function parseExtraction(
   }
 }
 
-function hasRecentSponsorDispatch(callId: string): boolean {
-  const entry = sponsorDispatchCache.get(callId);
-  if (!entry) return false;
-  if (Date.now() - entry > SPONSOR_DISPATCH_TTL_MS) {
-    sponsorDispatchCache.delete(callId);
-    return false;
-  }
-  return true;
-}
+async function hasRecentSponsorDispatch(callId: string): Promise<boolean> {
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  
+  // Note: in Supabase/PostgREST, we can filter JSONB properties natively
+  const { data } = await tables.reasoning_traces
+    .select("id")
+    .eq("input_data->>call_id", callId)
+    .gte("created_at", twentyFourHoursAgo)
+    .limit(1);
 
-function markSponsorDispatch(callId: string): void {
-  if (sponsorDispatchCache.size > 200) {
-    let oldestKey: string | null = null;
-    let oldestTs = Infinity;
-    sponsorDispatchCache.forEach((ts, key) => {
-      if (ts < oldestTs) {
-        oldestTs = ts;
-        oldestKey = key;
-      }
-    });
-    if (oldestKey) sponsorDispatchCache.delete(oldestKey);
-  }
-  sponsorDispatchCache.set(callId, Date.now());
+  return !!data && data.length > 0;
 }
 
 function normalizeOutcome(
@@ -284,7 +271,7 @@ async function triggerSponsorActions(
   task: ExtractionTask,
   extraction: CallExtraction,
 ): Promise<void> {
-  if (extraction.error || hasRecentSponsorDispatch(task.callId)) return;
+  if (extraction.error || await hasRecentSponsorDispatch(task.callId)) return;
 
   const [call, supplier] = await Promise.all([
     getCallById(task.callId),
@@ -295,7 +282,14 @@ async function triggerSponsorActions(
   const rfq = await getRFQById(call.rfq_id);
   if (!rfq) return;
 
-  markSponsorDispatch(task.callId);
+  // Inserting a trace here to serve as the idempotency mark for hasRecentSponsorDispatch
+  await tables.reasoning_traces.insert({
+    call_id: task.callId,
+    trace_type: 'function_call',
+    provider: 'system',
+    input_data: { call_id: task.callId, action: 'sponsor_dispatch' },
+    output_data: { success: true }
+  });
 
   const metadata =
     supplier.metadata && typeof supplier.metadata === "object"
@@ -311,14 +305,90 @@ async function triggerSponsorActions(
     call.result as Record<string, unknown> | null,
   );
 
+  // Load target/floor prices
+  const floorPrice = await getDecryptedFloorPrice(call.rfq_id);
+  const ctx: ScoringContext = {
+    targetPrice: rfq.target_price,
+    floorPrice,
+    targetLeadDays: null,
+  };
+
+  // Compute this supplier's score
+  const scoredSup = scoreSupplier(supplier.id, supplier.name, extraction, ctx);
+
+  // Construct the suppliers list for the buyer email
+  // Let's query all calls for this RFQ
+  const callsForRfq = await listCallsByRFQ(call.rfq_id);
+  
+  const scoredList: {
+    name: string;
+    quotedPrice: number | null;
+    leadTimeDays: number | null;
+    outcome: string;
+    compositeScore?: number;
+    rank?: number;
+  }[] = [];
+
+  // Add the current supplier to the list (using the freshly computed extraction)
+  scoredList.push({
+    name: supplier.name,
+    quotedPrice: extraction.quoted_price,
+    leadTimeDays: extraction.lead_time_days,
+    outcome,
+    compositeScore: scoredSup.composite_score,
+  });
+
+  // Add all other completed calls
+  for (const c of callsForRfq) {
+    if (c.id === call.id) continue;
+    if (c.status === "completed" && c.result) {
+      try {
+        const otherSup = await getSupplierById(c.supplier_id);
+        if (otherSup) {
+          const otherExt = c.result as any;
+          if (otherExt.quoted_price != null) {
+            const otherScored = scoreSupplier(otherSup.id, otherSup.name, otherExt, ctx);
+            scoredList.push({
+              name: otherSup.name,
+              quotedPrice: otherExt.quoted_price,
+              leadTimeDays: otherExt.lead_time_days,
+              outcome: normalizeOutcome(otherExt, c.result),
+              compositeScore: otherScored.composite_score,
+            });
+          }
+        }
+      } catch {}
+    }
+  }
+
+  // Sort and assign ranks
+  scoredList.sort((a, b) => (b.compositeScore || 0) - (a.compositeScore || 0));
+  scoredList.forEach((item, index) => {
+    item.rank = index + 1;
+  });
+
+  // Find current supplier's rank and score
+  const currentRanked = scoredList.find(s => s.name === supplier.name);
+  const compositeScore = currentRanked?.compositeScore || scoredSup.composite_score;
+  const rank = currentRanked?.rank || 1;
+
   const work: Promise<unknown>[] = [
     storeNegotiationMemory({
       supplierName: supplier.name,
       region,
       outcome,
       quotedPrice: extraction.quoted_price,
+      leadTimeDays: extraction.lead_time_days,
+      certifications: extraction.certifications || [],
       callId: task.callId,
     }),
+    sendBuyerPostCallEmail({
+      rfqTitle: rfq.title,
+      rfqId: rfq.id,
+      partName: rfq.title,
+      quantity,
+      suppliers: scoredList,
+    })
   ];
 
   if (supplier.email) {
@@ -332,6 +402,9 @@ async function triggerSponsorActions(
         leadTimeDays: extraction.lead_time_days,
         outcome,
         callId: task.callId,
+        rfqId: rfq.id,
+        compositeScore,
+        rank,
       }),
     );
   }
@@ -339,34 +412,7 @@ async function triggerSponsorActions(
   await Promise.allSettled(work);
 }
 
-export function getCachedExtraction(key: string): CallExtraction | null {
-  const entry = extractionCache.get(key);
-  if (!entry) return null;
-  if (Date.now() - entry.ts > EXTRACTION_CACHE_TTL_MS) {
-    extractionCache.delete(key);
-    return null;
-  }
-  return entry.result;
-}
 
-export function setCachedExtraction(key: string, result: CallExtraction): void {
-  if (extractionCache.size > 100) {
-    let oldestKey: string | null = null;
-    let oldestTs = Infinity;
-    extractionCache.forEach((entry, cacheKey) => {
-      if (entry.ts < oldestTs) {
-        oldestTs = entry.ts;
-        oldestKey = cacheKey;
-      }
-    });
-    if (oldestKey) extractionCache.delete(oldestKey);
-  }
-  extractionCache.set(key, { result, ts: Date.now() });
-}
-
-export function clearExtractionCache(): void {
-  extractionCache.clear();
-}
 
 export function buildTranscriptText(
   transcript: { role: string; content: string; timestamp?: string }[],

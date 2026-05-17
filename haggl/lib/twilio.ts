@@ -208,3 +208,12 @@ export function estimateCallCost(
   const minutes = Math.max(1, Math.ceil(durationSeconds / 60));
   return minutes * ratePerMinuteMillicents;
 }
+
+export function validateTwilioSignature(
+  authToken: string,
+  url: string,
+  params: Record<string, string>,
+  signature: string
+): boolean {
+  return twilio.validateRequest(authToken, signature, url, params);
+}

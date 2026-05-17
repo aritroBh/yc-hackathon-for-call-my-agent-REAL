@@ -3,7 +3,7 @@ import express from "express";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import { Server as SocketIOServer } from "socket.io";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { dirname, join } from "path";
 import { existsSync } from "fs";
 
@@ -11,15 +11,16 @@ const PORT = parseInt(process.env.SERVER_PORT || "3001", 10);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Resolve .ts or .js based on runtime
+// Resolve .ts or .js based on runtime and convert to file:// URL for Windows compatibility
 function resolveLib(modulePath) {
+  const localPath = join(__dirname, modulePath);
   const jsPath = join(__dirname, "..", modulePath.replace(".ts", ".js"));
-  const tsPath = join(__dirname, "..", modulePath);
   // In Docker standalone, compiled .js lives alongside the workers dir
   const standaloneJsPath = join(__dirname, modulePath.replace("../lib/", "./lib/").replace(".ts", ".js"));
-  if (existsSync(jsPath)) return jsPath;
-  if (existsSync(standaloneJsPath)) return standaloneJsPath;
-  return tsPath; // fallback — tsx will handle it
+  let resolved = localPath;
+  if (existsSync(jsPath)) resolved = jsPath;
+  else if (existsSync(standaloneJsPath)) resolved = standaloneJsPath;
+  return pathToFileURL(resolved).href;
 }
 
 // ── Lazy ESM imports ────────────────────────────────
@@ -92,6 +93,14 @@ io.on("connection", (socket) => {
     }));
     socket.emit("sessions:snapshot", sessions);
   }
+
+  socket.on("call_status_changed", (data) => {
+    io.emit("call_status_changed", data);
+  });
+
+  socket.on("reasoning_trace", (data) => {
+    io.emit("reasoning_trace", data);
+  });
 
   socket.on("disconnect", () => {
     console.log(`[io] Dashboard client disconnected: ${socket.id}`);
@@ -225,6 +234,7 @@ wss.on("connection", async (ws, req) => {
 
         const { OpusInjector } = await import(resolveLib("../lib/opusInjector.ts"));
         injector = new OpusInjector({
+          callId: callId,
           injectText: (text) => {
             deepgramSession.sendInstruction(text);
           },

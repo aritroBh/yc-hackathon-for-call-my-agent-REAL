@@ -1,6 +1,5 @@
 import { EventEmitter } from "node:events";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { tables } from "@/lib/db";
 
 export type QueueStatus =
   | "pending"
@@ -46,9 +45,7 @@ export class CallQueue extends EventEmitter {
   private maxConcurrent: number;
   private callsPerSecond: number;
   private lastCallTimestamps: number[] = [];
-  private persistPath: string | null = null;
-  private persistInterval: ReturnType<typeof setInterval> | null = null;
-  private processing = false;
+  private hydrated = false;
 
   constructor(opts?: {
     maxConcurrent?: number;
@@ -58,18 +55,42 @@ export class CallQueue extends EventEmitter {
     super();
     this.maxConcurrent = opts?.maxConcurrent ?? 5;
     this.callsPerSecond = opts?.callsPerSecond ?? 1;
-
-    if (opts?.persistDir) {
-      this.persistPath = join(opts.persistDir, "call_queue.json");
-      try {
-        mkdirSync(opts.persistDir, { recursive: true });
-      } catch {}
-      this.loadPersisted();
-      this.persistInterval = setInterval(() => this.persist(), 10_000);
-    }
   }
 
-  enqueue(entry: QueueEntry): void {
+  async hydrateFromDB(): Promise<void> {
+    if (this.hydrated) return;
+    const { data } = await tables.queue_entries.select("*").in("status", ["pending", "in_flight", "queued", "calling"]);
+    if (data) {
+      for (const row of data as any[]) {
+        const entry: QueueEntry = {
+          callId: row.call_id,
+          rfqId: row.rfq_id,
+          supplierId: row.supplier_id,
+          supplierName: row.supplier_name,
+          phone: row.phone,
+          priority: row.priority,
+          status: row.status as QueueStatus,
+          attempt: row.attempt,
+          maxAttempts: row.max_attempts,
+          error: row.error,
+          queuedAt: new Date(row.queued_at).getTime(),
+          startedAt: row.started_at ? new Date(row.started_at).getTime() : null,
+          completedAt: row.completed_at ? new Date(row.completed_at).getTime() : null,
+          twilioCallSid: row.twilio_call_sid,
+          result: null,
+        };
+        if (["pending"].includes(entry.status)) {
+          this.entries.push(entry);
+        } else {
+          this.inFlight.set(entry.callId, entry);
+        }
+      }
+      this.entries.sort((a, b) => b.priority - a.priority);
+    }
+    this.hydrated = true;
+  }
+
+  async enqueue(entry: QueueEntry): Promise<void> {
     const insertAt = this.entries.findIndex((e) => e.priority < entry.priority);
     if (insertAt === -1) {
       this.entries.push(entry);
@@ -77,14 +98,32 @@ export class CallQueue extends EventEmitter {
       this.entries.splice(insertAt, 0, entry);
     }
     this.emit("enqueued" as any, entry);
-    this.persist();
+    
+    await tables.queue_entries.insert({
+      call_id: entry.callId,
+      rfq_id: entry.rfqId,
+      supplier_id: entry.supplierId,
+      supplier_name: entry.supplierName,
+      phone: entry.phone,
+      priority: entry.priority,
+      status: entry.status,
+      attempt: entry.attempt,
+      max_attempts: entry.maxAttempts,
+      error: entry.error,
+      queued_at: new Date(entry.queuedAt).toISOString(),
+      started_at: entry.startedAt ? new Date(entry.startedAt).toISOString() : null,
+      completed_at: entry.completedAt ? new Date(entry.completedAt).toISOString() : null,
+      twilio_call_sid: entry.twilioCallSid,
+    });
   }
 
-  enqueueBatch(entries: QueueEntry[]): void {
-    entries.forEach((e) => this.enqueue(e));
+  async enqueueBatch(entries: QueueEntry[]): Promise<void> {
+    for (const e of entries) {
+      await this.enqueue(e);
+    }
   }
 
-  dequeue(): QueueEntry | null {
+  async dequeue(): Promise<QueueEntry | null> {
     if (this.inFlight.size >= this.maxConcurrent) return null;
     if (!this.canMakeCall()) return null;
 
@@ -94,6 +133,17 @@ export class CallQueue extends EventEmitter {
     if (idx === -1) return null;
 
     const entry = this.entries[idx];
+
+    // Atomic DB update
+    const { data, error } = await tables.queue_entries
+      .update({ status: "queued", started_at: new Date().toISOString() })
+      .eq("call_id", entry.callId)
+      .eq("status", "pending")
+      .select()
+      .single();
+
+    if (error || !data) return null;
+
     entry.status = "queued";
     entry.startedAt = Date.now();
     this.entries.splice(idx, 1);
@@ -101,26 +151,27 @@ export class CallQueue extends EventEmitter {
 
     this.emit("dequeued" as any, entry);
     this.emit("status_change" as any, entry.callId, "queued", "pending");
-    this.persist();
     return entry;
   }
 
-  complete(callId: string, result?: Record<string, unknown>): void {
+  async complete(callId: string, result?: Record<string, unknown>): Promise<void> {
     const entry = this.inFlight.get(callId);
     if (!entry) return;
     entry.status = "completed";
     entry.completedAt = Date.now();
     entry.result = result ?? null;
     this.inFlight.delete(callId);
+    
+    await tables.queue_entries.update({ status: "completed", completed_at: new Date().toISOString() }).eq("call_id", callId);
+
     this.emit("status_change" as any, callId, "completed", "queued");
     this.emit("completed" as any, entry);
-    this.persist();
     if (this.entries.length === 0 && this.inFlight.size === 0) {
       this.emit("drained" as any);
     }
   }
 
-  fail(callId: string, error: string): void {
+  async fail(callId: string, error: string): Promise<void> {
     const entry = this.inFlight.get(callId);
     if (!entry) {
       const pending = this.entries.find((e) => e.callId === callId);
@@ -130,13 +181,14 @@ export class CallQueue extends EventEmitter {
         if (pending.attempt >= pending.maxAttempts) {
           pending.status = "failed";
           pending.completedAt = Date.now();
+          await tables.queue_entries.update({ status: "failed", completed_at: new Date().toISOString(), attempt: pending.attempt, error }).eq("call_id", callId);
           this.emit("status_change" as any, callId, "failed", pending.status);
           this.emit("failed" as any, pending, error);
         } else {
           pending.status = "pending";
+          await tables.queue_entries.update({ status: "pending", attempt: pending.attempt, error }).eq("call_id", callId);
           this.emit("retrying" as any, pending, pending.attempt);
         }
-        this.persist();
       }
       return;
     }
@@ -149,33 +201,37 @@ export class CallQueue extends EventEmitter {
     if (entry.attempt < entry.maxAttempts) {
       entry.status = "pending";
       this.entries.push(entry);
+      await tables.queue_entries.update({ status: "pending", attempt: entry.attempt, error }).eq("call_id", callId);
       this.emit("retrying" as any, entry, entry.attempt);
     } else {
       entry.status = "failed";
       entry.completedAt = Date.now();
+      await tables.queue_entries.update({ status: "failed", completed_at: new Date().toISOString(), attempt: entry.attempt, error }).eq("call_id", callId);
       this.emit("failed" as any, entry, error);
     }
-    this.persist();
+
     if (this.entries.length === 0 && this.inFlight.size === 0) {
       this.emit("drained" as any);
     }
   }
 
-  updateStatus(callId: string, status: QueueStatus): void {
+  async updateStatus(callId: string, status: QueueStatus): Promise<void> {
     const entry =
       this.inFlight.get(callId) ||
       this.entries.find((e) => e.callId === callId);
     if (!entry) return;
     const prev = entry.status;
     entry.status = status;
+    await tables.queue_entries.update({ status }).eq("call_id", callId);
     this.emit("status_change" as any, callId, status, prev);
   }
 
-  markCalling(callId: string, twilioSid: string): void {
+  async markCalling(callId: string, twilioSid: string): Promise<void> {
     const entry = this.inFlight.get(callId);
     if (!entry) return;
     entry.status = "calling";
     entry.twilioCallSid = twilioSid;
+    await tables.queue_entries.update({ status: "calling", twilio_call_sid: twilioSid }).eq("call_id", callId);
     this.emit("status_change" as any, callId, "calling", "queued");
   }
 
@@ -237,43 +293,9 @@ export class CallQueue extends EventEmitter {
   }
 
   destroy(): void {
-    if (this.persistInterval) {
-      clearInterval(this.persistInterval);
-      this.persistInterval = null;
-    }
-    this.persist();
     this.removeAllListeners();
     this.entries = [];
     this.inFlight.clear();
-  }
-
-  private persist(): void {
-    if (!this.persistPath) return;
-    try {
-      const data = {
-        entries: this.entries,
-        inFlight: (() => { const arr: QueueEntry[] = []; this.inFlight.forEach((v) => arr.push(v)); return arr; })(),
-        lastCallTimestamps: this.lastCallTimestamps,
-      };
-      writeFileSync(this.persistPath, JSON.stringify(data, null, 2));
-    } catch {}
-  }
-
-  private loadPersisted(): void {
-    if (!this.persistPath || !existsSync(this.persistPath)) return;
-    try {
-      const raw = readFileSync(this.persistPath, "utf-8");
-      const data = JSON.parse(raw);
-      if (Array.isArray(data.entries)) this.entries = data.entries;
-      if (Array.isArray(data.inFlight)) {
-        data.inFlight.forEach((entry: QueueEntry) => {
-          this.inFlight.set(entry.callId, entry);
-        });
-      }
-      if (Array.isArray(data.lastCallTimestamps)) {
-        this.lastCallTimestamps = data.lastCallTimestamps;
-      }
-    } catch {}
   }
 }
 

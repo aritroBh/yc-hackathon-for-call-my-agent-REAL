@@ -16,6 +16,7 @@ interface ResultsData {
   best_price_supplier: string | null;
   best_price_supplier_id: string | null;
   average_quoted_price: number | null;
+  total_cost_millicents?: number;
   ranked_suppliers: any[];
   explanations: any[];
   recommended_supplier: any | null;
@@ -113,11 +114,12 @@ export default function ResultsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <StatBox label="Total Calls" value={results?.total_calls || 0} />
         <StatBox label="Successful" value={results?.successful_calls || 0} color="text-emerald-400" />
         <StatBox label="Suppliers" value={results?.suppliers_responded || 0} />
         <StatBox label="Avg. Price" value={results?.average_quoted_price != null ? `$${results.average_quoted_price.toLocaleString()}` : "—"} />
+        <StatBox label="AI & Telecom Cost" value={results?.total_cost_millicents != null ? `$${(results.total_cost_millicents / 100_000).toFixed(2)}` : "—"} color="text-slate-400" />
       </div>
 
       {!isReady ? (
@@ -155,6 +157,19 @@ export default function ResultsPage() {
             </div>
           </div>
 
+          <div className="bg-gradient-to-r from-slate-900/60 via-indigo-950/20 to-slate-900/60 border border-indigo-500/20 rounded-lg p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+            <div className="flex items-center gap-2">
+              <span className="text-sm">📬</span>
+              <div>
+                <p className="text-xs font-bold text-slate-200">AgentMail Intelligent Notifications Dispatched</p>
+                <p className="text-[10px] text-slate-500">Auto-generated rich summaries sent to active suppliers & primary buyer inbox.</p>
+              </div>
+            </div>
+            <div className="text-[9px] font-mono uppercase bg-indigo-950/40 border border-indigo-500/30 px-2 py-0.5 rounded text-indigo-300">
+              Dispatched: {results.created_at ? new Date(results.created_at).toLocaleTimeString() : new Date().toLocaleTimeString()}
+            </div>
+          </div>
+
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Supplier Rankings</h2>
@@ -166,6 +181,10 @@ export default function ResultsPage() {
               suppliers={results.ranked_suppliers}
               explanations={results.explanations}
               recommended={results.recommended_supplier}
+              totalCostMillicents={results.total_cost_millicents}
+              rfqId={id}
+              rfqStatus={rfq?.status || ""}
+              onRefreshRfq={fetchResults}
             />
           </div>
 

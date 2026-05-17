@@ -3,7 +3,8 @@ import { z } from "zod";
 import { tables, getRFQById, getSupplierById, getDecryptedFloorPrice, listCallsByRFQ } from "@/lib/db";
 import { FeedbackCreateSchema } from "@/lib/validators";
 import { computeActualSavings } from "@/lib/patternExtraction";
-import { initiatePayment } from "@/lib/sponsors/sponge";
+import { initiatePayment, initiateSpongePayment } from "@/lib/sponsors/sponge";
+import { createPaymentLink, recordSavingsEvent } from "@/lib/sponsors/stripe";
 import type { FeedbackRow, CallRow } from "@/types/database";
 
 const AwardSupplierSchema = z.object({
@@ -128,7 +129,7 @@ async function handleAward(request: NextRequest): Promise<NextResponse> {
   const parsed = AwardSupplierSchema.parse(body);
 
   const { data: rfqSupplier, error: findError } = await tables.rfq_suppliers
-    .select("id, rfq_id")
+    .select("id, rfq_id, metadata")
     .eq("supplier_id", parsed.supplier_id)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -161,20 +162,67 @@ async function handleAward(request: NextRequest): Promise<NextResponse> {
     .eq("id", rfq.id);
   if (updateError) throw updateError;
 
+  const supplier = await getSupplierById(parsed.supplier_id);
+  if (!supplier) return NextResponse.json({ error: "Supplier not found" }, { status: 404 });
+
+  // 1. Trigger Sponge Autonomous Payment
+  let spongePayment = null;
+  if (quotedPrice && quotedPrice > 0) {
+    try {
+      spongePayment = await initiateSpongePayment({
+        amount: quotedPrice,
+        currency: rfq.currency || "USD",
+        recipientName: supplier.name,
+        recipientEmail: supplier.email || "supplier@example.com",
+        memo: `HAGGL payment for RFQ: ${rfq.title}`,
+        callId: successfulCall?.id || "manual-award",
+      });
+    } catch (err: any) {
+      console.warn("[Award] Sponge payment initiation failed:", err.message);
+    }
+  }
+
+  // 2. Trigger Stripe Payment Link & Savings Event
+  let stripeLink = null;
+  if (quotedPrice && quotedPrice > 0) {
+    try {
+      stripeLink = await createPaymentLink(quotedPrice, rfq.currency || "USD", {
+        rfq_id: rfq.id,
+        call_id: successfulCall?.id || "manual-award",
+        supplier_id: supplier.id,
+      });
+
+      // Track savings in Stripe customer metadata
+      if (rfq.target_price && quotedPrice < rfq.target_price) {
+        const savingsAmount = rfq.target_price - quotedPrice;
+        await recordSavingsEvent(rfq.id, savingsAmount);
+      }
+    } catch (err: any) {
+      console.warn("[Award] Stripe link generation failed:", err.message);
+    }
+  }
+
+  // 3. Save transactions in rfq_suppliers metadata
+  const currentMetadata = (rfqSupplier.metadata as Record<string, unknown>) || {};
+  const updatedMetadata = {
+    ...currentMetadata,
+    sponsor_sponge_payment_id: spongePayment?.payment_id || null,
+    sponsor_sponge_status: spongePayment?.status || "failed",
+    sponsor_stripe_payment_link: stripeLink?.url || null,
+    sponsor_stripe_payment_link_id: stripeLink?.paymentLinkId || null,
+    sponsor_savings_tracked: (rfq.target_price && quotedPrice) ? (rfq.target_price - quotedPrice) : 0,
+    sponsor_payment_timestamp: new Date().toISOString()
+  };
+
   const { error: linkError } = await tables.rfq_suppliers
-    .update({ notes: parsed.notes || "Awarded", status: "agreed", updated_at: new Date().toISOString() })
+    .update({
+      notes: parsed.notes || "Awarded",
+      status: "agreed",
+      metadata: updatedMetadata,
+      updated_at: new Date().toISOString()
+    })
     .eq("id", rfqSupplier.id);
   if (linkError) throw linkError;
-
-  if (process.env.SPONGE_API_KEY) {
-    void initiatePayment({
-      rfqId: rfq.id,
-      supplierId: parsed.supplier_id,
-      amount: quotedPrice || 0,
-      currency: rfq.currency || "USD",
-      description: "Award: " + (rfq.title || "RFQ"),
-    }).catch(() => {});
-  }
 
   return NextResponse.json({
     success: true,
@@ -185,6 +233,8 @@ async function handleAward(request: NextRequest): Promise<NextResponse> {
     target_price: rfq.target_price,
     floor_price: floorPrice,
     savings,
+    sponsor_sponge_payment_id: spongePayment?.payment_id || null,
+    sponsor_stripe_payment_link: stripeLink?.url || null,
   });
 }
 

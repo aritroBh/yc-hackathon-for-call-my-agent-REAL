@@ -114,3 +114,19 @@ export function useSocket() {
 
   return { socket, connected, reconnecting };
 }
+
+let _serverSideSocket: Socket | null = null;
+
+export function getSocketServer() {
+  if (typeof window === "undefined") {
+    if (!_serverSideSocket) {
+      _serverSideSocket = io(SOCKET_URL, {
+        transports: ["websocket"],
+        autoConnect: true,
+      });
+    }
+    return _serverSideSocket;
+  }
+  return null;
+}
+

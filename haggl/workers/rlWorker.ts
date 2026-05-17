@@ -246,7 +246,7 @@ export class RLWorker {
 
   private inferLocale(region: string | null, country: string | null): string | null {
     const regionMap: Record<string, string> = {
-      "Midwest": "hi-IN",
+      "Midwest": "en-US",
       "Maharashtra": "hi-IN",
       "Shanghai": "zh-CN",
       "Dubai": "ar-AE",

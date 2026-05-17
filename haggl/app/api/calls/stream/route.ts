@@ -51,11 +51,24 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
+    const signature = req.headers.get("x-twilio-signature");
+    const fullUrl = req.url;
+
     const formData = await req.formData();
     const body: Record<string, string> = {};
     formData.forEach((value, key) => {
       body[key] = String(value);
     });
+
+    const isDemo = process.env.DEMO_MODE === "true" || process.env.NODE_ENV === "test";
+    
+    if (!isDemo) {
+      const { validateTwilioSignature } = await import("@/lib/twilio");
+      const authToken = process.env.TWILIO_AUTH_TOKEN || "";
+      if (!signature || !validateTwilioSignature(authToken, fullUrl, body, signature)) {
+        return NextResponse.json({ error: "Invalid signature" }, { status: 403 });
+      }
+    }
 
     const { parseStatusWebhook, mapTwilioStatusToCallStatus } = await import(
       "@/lib/twilio"

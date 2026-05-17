@@ -19,12 +19,20 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const parsed = DispatchBodySchema.parse(body);
 
-    let orgId = parsed.organization_id;
-    if (!orgId) {
-      const { getRFQById } = await import("@/lib/db");
-      const rfq = await getRFQById(parsed.rfq_id);
-      if (!rfq) return NextResponse.json({ error: "RFQ not found" }, { status: 404 });
-      orgId = rfq.organization_id;
+    const { getAuthMiddleware, AUTH_CONFIG } = await import("@/lib/authMiddleware");
+    const authResult = await getAuthMiddleware(request);
+    
+    if (!authResult.ok && !AUTH_CONFIG.skipAuth) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { getRFQById } = await import("@/lib/db");
+    const rfq = await getRFQById(parsed.rfq_id);
+    if (!rfq) return NextResponse.json({ error: "RFQ not found" }, { status: 404 });
+
+    const orgId = authResult.organizationId || rfq.organization_id;
+    if (orgId !== rfq.organization_id && !AUTH_CONFIG.skipAuth) {
+      return NextResponse.json({ error: "Forbidden: RFQ organization mismatch" }, { status: 403 });
     }
 
     const dispatcher = getDispatcher({
@@ -68,6 +76,9 @@ export async function POST(request: NextRequest) {
       );
     }
     const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("already being dispatched")) {
+      return NextResponse.json({ error: message }, { status: 409 });
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
@@ -82,7 +93,7 @@ export async function GET(request: NextRequest) {
     const worker = getCallWorker();
 
     if (rfqId) {
-      const session = dispatcher.getSession(rfqId);
+      const session = await dispatcher.getSession(rfqId);
       const entries = queue.getByRFQ(rfqId);
       return NextResponse.json({
         session: session || null,

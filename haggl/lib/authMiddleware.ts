@@ -59,3 +59,22 @@ export async function authMiddleware(request: NextRequest): Promise<NextResponse
 export const AUTH_CONFIG = {
   skipAuth: process.env.ENABLE_AUTH === "false" || process.env.DEMO_MODE === "true",
 };
+
+export async function getAuthMiddleware(request: NextRequest): Promise<{ ok: boolean, userId?: string, organizationId?: string }> {
+  if (AUTH_CONFIG.skipAuth) return { ok: true, organizationId: process.env.NEXT_PUBLIC_DEMO_ORG_ID };
+
+  const authHeader = request.headers.get("authorization");
+  let token: string | null = null;
+  if (authHeader?.startsWith("Bearer ")) token = authHeader.slice(7);
+  else token = request.cookies.get("sb-access-token")?.value || null;
+
+  if (!token) return { ok: false };
+
+  const { user, error } = await verifyToken(token);
+  if (error || !user) return { ok: false };
+
+  const { getOrganizationForUser } = await import("@/lib/auth");
+  const orgId = await getOrganizationForUser(user.id);
+
+  return { ok: true, userId: user.id, organizationId: orgId || undefined };
+}

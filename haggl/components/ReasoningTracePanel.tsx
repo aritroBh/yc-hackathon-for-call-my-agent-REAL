@@ -11,7 +11,7 @@ interface TraceEvent {
   claim?: string;
   confidence?: number;
   timestamp: string;
-  data?: Record<string, unknown>;
+  data?: any;
 }
 
 interface Props {
@@ -48,19 +48,46 @@ export default function ReasoningTracePanel({ callId, maxItems = 50 }: Props) {
   const [expanded, setExpanded] = useState<number | null>(null);
 
   useEffect(() => {
+    if (callId) {
+      fetch(`/api/calls/${callId}/traces`)
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data)) {
+            setTraces(data.map(d => ({
+              type: d.trace_type,
+              call_id: d.input_data?.call_id,
+              supplier_id: "",
+              category: d.category || "general",
+              claim: d.input_data?.supplier_turn,
+              confidence: d.output_data?.confidence === 'high' ? 0.9 : d.output_data?.confidence === 'medium' ? 0.5 : 0.2,
+              timestamp: d.created_at,
+              data: d.output_data
+            })));
+          }
+        })
+        .catch(console.error);
+    }
+  }, [callId]);
+
+  useEffect(() => {
     if (!socket) return;
     const handler = (event: any) => {
-      const type = event.type || "";
-      if (type.startsWith("opus_") || type === "negotiation_insight") {
-        if (callId && event.call_id !== callId) return;
+      const type = event.type || event.traceType || "";
+      if (type.startsWith("opus_") || type === "negotiation_insight" || type === "live_intel_injection") {
+        const evCallId = event.callId || event.call_id;
+        if (callId && evCallId !== callId) return;
         setTraces((prev) => {
-          const next = [{ ...event, timestamp: event.timestamp || new Date().toISOString() }, ...prev];
+          const next = [{ ...event, type, timestamp: event.timestamp || new Date().toISOString() }, ...prev];
           return next.slice(0, maxItems);
         });
       }
     };
     socket.on("live_call_event", handler);
-    return () => { socket.off("live_call_event", handler); };
+    socket.on("reasoning_trace", handler);
+    return () => { 
+      socket.off("live_call_event", handler);
+      socket.off("reasoning_trace", handler);
+    };
   }, [socket, callId, maxItems]);
 
   if (traces.length === 0 && !connected) {
@@ -119,8 +146,61 @@ export default function ReasoningTracePanel({ callId, maxItems = 50 }: Props) {
                     </button>
                   )}
                   {isExpanded && trace.data && (
-                    <div className="mt-1 p-2 bg-slate-900/50 rounded text-[10px] font-mono text-slate-400 whitespace-pre-wrap max-h-32 overflow-y-auto">
-                      {JSON.stringify(trace.data, null, 2)}
+                    <div className="mt-2 space-y-2 p-2.5 bg-slate-900/80 border border-slate-700/50 rounded-md text-[10px] text-slate-300 max-h-60 overflow-y-auto font-sans leading-relaxed">
+                      {trace.data.rebuttal_context && (
+                        <div>
+                          <strong className="text-cyan-400 block font-semibold mb-0.5">Rebuttal Context:</strong>
+                          <span className="text-slate-200">{String(trace.data.rebuttal_context)}</span>
+                        </div>
+                      )}
+                      {trace.data.suggested_position && (
+                        <div className="mt-1.5">
+                          <strong className="text-indigo-400 block font-semibold mb-0.5">Suggested Position:</strong>
+                          <span className="text-slate-200 bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-900/30 block mt-0.5 font-mono text-[9px]">{String(trace.data.suggested_position)}</span>
+                        </div>
+                      )}
+                      
+                      {trace.data.moss_facts && Array.isArray(trace.data.moss_facts) && trace.data.moss_facts.length > 0 && (
+                        <div className="border-t border-slate-700/50 pt-2 mt-2">
+                          <strong className="text-emerald-400 flex items-center gap-1 font-semibold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                            Moss Semantic Search Context
+                          </strong>
+                          <ul className="list-disc pl-4 space-y-0.5 mt-1 text-slate-400 text-[9px]">
+                            {trace.data.moss_facts.map((fact: string, idx: number) => (
+                              <li key={idx}>{fact}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      
+                      {trace.data.supermemory_context && (
+                        <div className="border-t border-slate-700/50 pt-2 mt-2">
+                          <strong className="text-pink-400 flex items-center gap-1 font-semibold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-pink-400 shrink-0" />
+                            Supermemory Historic Context
+                          </strong>
+                          <p className="mt-1 text-slate-400 text-[9px] bg-pink-950/10 p-1.5 rounded border border-pink-900/20 font-mono leading-normal whitespace-pre-wrap">{String(trace.data.supermemory_context)}</p>
+                        </div>
+                      )}
+                      
+                      {trace.data.pre_call_research && (
+                        <div className="border-t border-slate-700/50 pt-2 mt-2">
+                          <strong className="text-purple-400 flex items-center gap-1 font-semibold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
+                            Browser Use Pre-Call crawler Context
+                          </strong>
+                          <pre className="mt-1 p-1.5 bg-slate-950 rounded text-slate-400 font-mono text-[8px] overflow-x-auto whitespace-pre-wrap max-h-24 leading-normal">
+                            {JSON.stringify(trace.data.pre_call_research, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                      
+                      {!trace.data.moss_facts && !trace.data.pre_call_research && !trace.data.supermemory_context && (
+                        <pre className="p-1 bg-slate-950 rounded text-slate-400 font-mono text-[9px] overflow-x-auto whitespace-pre-wrap max-h-24 mt-1.5">
+                          {JSON.stringify(trace.data, null, 2)}
+                        </pre>
+                      )}
                     </div>
                   )}
                 </div>
@@ -130,7 +210,7 @@ export default function ReasoningTracePanel({ callId, maxItems = 50 }: Props) {
         })}
         {traces.length === 0 && (
           <div className="p-6 text-center text-[10px] text-slate-600 italic">
-            Waiting for intelligence...
+            Waiting for supplier claims to trigger intel injection...
           </div>
         )}
       </div>

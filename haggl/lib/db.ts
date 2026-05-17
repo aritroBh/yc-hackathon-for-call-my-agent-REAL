@@ -16,6 +16,201 @@ import type {
   FeedbackRow,
 } from "@/types/database";
 
+// ── In-Memory Database Fallback for Offline Demo ──────────
+
+const mockDbState = {
+  users: [
+    {
+      id: "00000000-0000-0000-0000-000000000001",
+      email: "buyer@haggl.ai",
+      name: "Demo Buyer",
+      organization_id: "00000000-0000-0000-0000-000000000001",
+      role: "admin",
+      status: "active",
+      created_at: new Date().toISOString()
+    }
+  ],
+  suppliers: [
+    {
+      id: "s1",
+      organization_id: "00000000-0000-0000-0000-000000000001",
+      name: "Apex Steel Corp",
+      phone: "+15550100111",
+      email: "sales@apexsteel.com",
+      status: "active",
+      metadata: { region: "US East" },
+      created_at: new Date().toISOString()
+    },
+    {
+      id: "s2",
+      organization_id: "00000000-0000-0000-0000-000000000001",
+      name: "Summit Plastics",
+      phone: "+15550100222",
+      email: "info@summitplastics.com",
+      status: "active",
+      metadata: { region: "US West" },
+      created_at: new Date().toISOString()
+    },
+    {
+      id: "s3",
+      organization_id: "00000000-0000-0000-0000-000000000001",
+      name: "Global Castings Ltd",
+      phone: "+15550100333",
+      email: "orders@globalcastings.com",
+      status: "active",
+      metadata: { region: "EU Central" },
+      created_at: new Date().toISOString()
+    }
+  ],
+  rfqs: [
+    {
+      id: "r1",
+      organization_id: "00000000-0000-0000-0000-000000000001",
+      title: "Precision Stamped Brackets (Grade-A Steel)",
+      status: "negotiating",
+      target_price: 8.50,
+      floor_price: "floor_enc_mock",
+      created_at: new Date().toISOString()
+    }
+  ],
+  rfq_suppliers: [
+    { id: "rs1", rfq_id: "r1", supplier_id: "s1", status: "pending", priority: 3, supplier: null },
+    { id: "rs2", rfq_id: "r1", supplier_id: "s2", status: "pending", priority: 2, supplier: null },
+    { id: "rs3", rfq_id: "r1", supplier_id: "s3", status: "pending", priority: 1, supplier: null }
+  ],
+  calls: [] as any[],
+  reasoning_traces: [] as any[],
+  feedback: [] as any[],
+  dispatch_sessions: [] as any[],
+  queue_entries: [] as any[],
+  learned_patterns: [] as any[]
+};
+
+class MockQueryBuilder {
+  private tableName: string;
+  private data: any[];
+
+  constructor(tableName: string) {
+    this.tableName = tableName;
+    const keyMap: Record<string, keyof typeof mockDbState> = {
+      users: "users",
+      suppliers: "suppliers",
+      rfqs: "rfqs",
+      rfq_suppliers: "rfq_suppliers",
+      calls: "calls",
+      reasoning_traces: "reasoning_traces",
+      feedback: "feedback",
+      dispatch_sessions: "dispatch_sessions",
+      queue_entries: "queue_entries",
+      learned_patterns: "learned_patterns"
+    };
+    const dbKey = keyMap[tableName] || (tableName as any);
+    if (!mockDbState[dbKey]) {
+      mockDbState[dbKey] = [];
+    }
+    this.data = mockDbState[dbKey];
+
+    // Handle standard relationship joins
+    if (dbKey === "rfq_suppliers") {
+      this.data.forEach(rs => {
+        rs.supplier = mockDbState.suppliers.find(s => s.id === rs.supplier_id) || null;
+      });
+    }
+  }
+
+  select(columns: string = "*") {
+    let current = [...this.data];
+    const chain = {
+      eq: (col: string, val: any) => {
+        current = current.filter(item => item[col] === val);
+        return chain;
+      },
+      not: (col: string, op: string, val: any) => {
+        current = current.filter(item => item[col] !== val);
+        return chain;
+      },
+      in: (col: string, arr: any[]) => {
+        current = current.filter(item => arr.includes(item[col]));
+        return chain;
+      },
+      order: (col: string, opts?: { ascending?: boolean }) => {
+        current.sort((a, b) => {
+          const valA = a[col];
+          const valB = b[col];
+          if (valA < valB) return opts?.ascending ? -1 : 1;
+          if (valA > valB) return opts?.ascending ? 1 : -1;
+          return 0;
+        });
+        return chain;
+      },
+      limit: (val: number) => {
+        current = current.slice(0, val);
+        return chain;
+      },
+      single: async () => {
+        if (current.length === 0) return { data: null, error: null };
+        return { data: current[0], error: null };
+      },
+      then: (resolve: any) => {
+        resolve({ data: current, error: null });
+      }
+    };
+    return chain;
+  }
+
+  insert(payload: any) {
+    const records = Array.isArray(payload) ? payload : [payload];
+    const inserted: any[] = [];
+    records.forEach(rec => {
+      const newRec = {
+        id: rec.id || Math.random().toString(36).substr(2, 9),
+        created_at: new Date().toISOString(),
+        ...rec
+      };
+      this.data.push(newRec);
+      inserted.push(newRec);
+    });
+
+    const chain = {
+      select: () => {
+        return {
+          single: async () => {
+            return { data: inserted[0], error: null };
+          },
+          then: (resolve: any) => resolve({ data: inserted, error: null })
+        };
+      },
+      then: (resolve: any) => resolve({ data: inserted, error: null })
+    };
+    return chain;
+  }
+
+  update(payload: any) {
+    let affected: any[] = [];
+    const chain = {
+      eq: (col: string, val: any) => {
+        this.data.forEach(item => {
+          if (item[col] === val) {
+            Object.assign(item, payload);
+            affected.push(item);
+          }
+        });
+        return chain;
+      },
+      select: () => {
+        return {
+          single: async () => {
+            return { data: affected[0], error: null };
+          },
+          then: (resolve: any) => resolve({ data: affected, error: null })
+        };
+      },
+      then: (resolve: any) => resolve({ data: affected, error: null })
+    };
+    return chain;
+  }
+}
+
 // ── Client factory ──────────────────────────────────
 
 let _serviceClient: SupabaseClient | null = null;
@@ -24,7 +219,18 @@ function getServiceClient(): SupabaseClient {
   if (_serviceClient) return _serviceClient;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Supabase credentials not configured");
+
+  if (!url || !key) {
+    if (process.env.DEMO_MODE === "true") {
+      console.warn("[db] Supabase credentials missing. Booting high-fidelity local in-memory DB.");
+      _serviceClient = {
+        from: (table: string) => new MockQueryBuilder(table)
+      } as any;
+      return _serviceClient!;
+    }
+    throw new Error("Supabase credentials not configured");
+  }
+
   _serviceClient = createClient(url, key, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
@@ -61,6 +267,15 @@ export const tables = {
   },
   get feedback() {
     return getServiceClient().from("feedback");
+  },
+  get dispatch_sessions() {
+    return getServiceClient().from("dispatch_sessions");
+  },
+  get queue_entries() {
+    return getServiceClient().from("queue_entries");
+  },
+  get learned_patterns() {
+    return getServiceClient().from("learned_patterns");
   },
 };
 
