@@ -10,7 +10,7 @@ import { getDialectByLocale } from "@/lib/prompts/dialectPrompts";
 import { buildNegotiationPrompt } from "@/lib/promptBuilder";
 import { shouldTrigger } from "@/lib/triggerDetection";
 import { searchMossForContext } from "@/lib/sponsors/moss";
-import { getSupplierMemory } from "@/lib/sponsors/supermemory";
+import { getSupplierMemory, getLanguageContext } from "@/lib/sponsors/supermemory";
 import { getSocketServer } from "@/lib/socket";
 import { getCallQueue } from "@/lib/queue";
 import { getDispatcher } from "@/lib/dispatcher";
@@ -72,6 +72,8 @@ async function buildIntelContext(
     // 2. Supermemory
     const supplierRegion = supplier.metadata?.region || "US East";
     const memories = await getSupplierMemory(supplier.name, supplierRegion);
+    const locale = getLocaleForLanguage(supplier?.metadata?.language || 'english');
+    const langContext = await getLanguageContext(locale);
 
     // 3. Pre-call Browser Use research
     let preCallResearch = "";
@@ -90,8 +92,11 @@ async function buildIntelContext(
 VERIFIED MARKET FACTS (from Moss semantic search):
 ${mossFactsStr || "None available"}
 
+LANGUAGE & CULTURAL INTELLIGENCE (from Supermemory):
+${langContext || "No language context available"}
+
 HISTORICAL SUPPLIER INTELLIGENCE (from past negotiations):
-${memories || "None available"}
+${memories || "No prior negotiations on record"}
 
 PRE-CALL RESEARCH (Browser Use):
 ${preCallResearch || "None available"}

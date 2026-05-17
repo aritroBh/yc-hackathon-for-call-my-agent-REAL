@@ -1,86 +1,148 @@
-import axios from "axios";
+import Supermemory from 'supermemory'
 
-const BASE = process.env.SUPERMEMORY_BASE_URL || "https://api.supermemory.ai/v3";
-const API_KEY = process.env.SUPERMEMORY_API_KEY;
+const API_KEY = process.env.SUPERMEMORY_API_KEY
 
+let _client: Supermemory | null = null
+function getClient(): Supermemory | null {
+  if (!API_KEY) return null
+  if (!_client) _client = new Supermemory({ apiKey: API_KEY })
+  return _client
+}
+
+// ── Container tags ───────────────────────────────────
+// Three separate memory spaces:
+export const CONTAINERS = {
+  COMPANY:    'haggl-company-context',      // Who HAGGL is, what it does
+  LANGUAGES:  'haggl-language-context',     // Twi, Yoruba, Hindi, cultural negotiation rules
+  VENDORS:    'haggl-vendor-context',       // Supplier knowledge, procurement patterns
+  NEGOTIATIONS: 'haggl-negotiations',       // Live call outcomes (existing)
+} as const
+
+// ── READ: Vendor memory (called during live calls) ───
 export async function getSupplierMemory(
   supplierName: string,
   region?: string,
 ): Promise<string> {
-  const getMockMemories = (name: string, reg?: string): string => {
-    const r = reg || "US East";
-    return [
-      `[Memory 2026-02-14] Supplier ${name} in ${r} quoted $8.40/unit on initial inquiries. They refused Net 60 payment terms but settled on Net 45 after we agreed to a 1,000 unit minimum order.`,
-      `[Memory 2025-11-03] Supplier ${name} had a lead time overrun of 4 days on order PO-9923. Their operations manager noted shipping congestion at Savannah port but eventually waived the expedited shipping fee.`,
-      `[Memory 2025-08-20] Negotiation with ${name} completed with 'quoted' status at $8.15/unit. They disclosed ISO-9001 and AS9100D aerospace quality certifications.`
-    ].join("\n");
-  };
-
-  if (!API_KEY) {
-    return getMockMemories(supplierName, region);
-  }
+  const client = getClient()
+  if (!client) return getMockMemories(supplierName, region)
 
   try {
-    const { data } = await axios.post(
-      `${BASE}/search`,
-      { 
-        q: `${supplierName} ${region || ""} negotiation history`.trim(),
-        containerTags: ['haggl-negotiations']
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        timeout: 3000,
-      }
-    );
-    const memories = data.results || data.memories || [];
-    if (memories.length === 0) {
-      return getMockMemories(supplierName, region);
-    }
-    return memories
-      .map((m: any) => m.content || m.text || "")
+    // Search both vendor context and live negotiation history
+    const [vendorRes, negotiationRes] = await Promise.all([
+      client.search.documents({
+        q: `${supplierName} ${region || ''} supplier vendor`.trim(),
+        containerTags: [CONTAINERS.VENDORS],
+      }),
+      client.search.documents({
+        q: `${supplierName} ${region || ''} negotiation history`.trim(),
+        containerTags: [CONTAINERS.NEGOTIATIONS],
+      }),
+    ])
+
+    const all = [
+      ...(vendorRes.results || []),
+      ...(negotiationRes.results || []),
+    ]
+
+    if (all.length === 0) return getMockMemories(supplierName, region)
+
+    return all
+      .map((m: any) => m.content || m.document?.content || m.chunks?.map((c: any) => c.content).join('\n') || '')
       .filter(Boolean)
-      .join("\n");
+      .join('\n')
   } catch (err: any) {
-    console.warn("[supermemory] search failed, returning rich mock fallback:", err.message);
-    return getMockMemories(supplierName, region);
+    console.warn('[supermemory] getSupplierMemory failed:', err.message)
+    return getMockMemories(supplierName, region)
   }
 }
 
-export async function storeNegotiationMemory(params: {
-  supplierName: string;
-  region: string;
-  outcome: string;
-  quotedPrice: number | null;
-  leadTimeDays: number | null;
-  certifications: string[];
-  callId: string;
-}): Promise<void> {
-  if (!API_KEY) {
-    console.log("[supermemory] store skipped (no API key)");
-    return;
-  }
-  const content = `Supplier ${params.supplierName} in ${params.region}: quoted $${params.quotedPrice || 'none'}/unit, lead time ${params.leadTimeDays || 'TBD'} days, outcome: ${params.outcome}, certifications: ${params.certifications.join(', ') || 'none'}. Call ID: ${params.callId}`;
+// ── READ: Language context (called before each call) ─
+export async function getLanguageContext(locale: string): Promise<string> {
+  const client = getClient()
+  if (!client) return ''
+
   try {
-    await axios.post(
-      `${BASE}/add`,
-      { 
-        content, 
-        containerTags: ['haggl-negotiations', `supplier-${params.supplierName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`]
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        timeout: 3000,
-      },
-    );
-    console.log("[supermemory] successfully stored negotiation memory");
+    const res = await client.search.documents({
+      q: locale + ' language negotiation culture business',
+      containerTags: [CONTAINERS.LANGUAGES],
+    })
+    return (res.results || [])
+      .map((m: any) => m.content || m.document?.content || m.chunks?.map((c: any) => c.content).join('\n') || '')
+      .filter(Boolean)
+      .join('\n')
   } catch (err: any) {
-    console.warn("[supermemory] store failed:", err.message);
+    console.warn('[supermemory] getLanguageContext failed:', err.message)
+    return ''
   }
 }
 
+// ── READ: Company context ─────────────────────────────
+export async function getCompanyContext(query: string): Promise<string> {
+  const client = getClient()
+  if (!client) return ''
+
+  try {
+    const res = await client.search.documents({
+      q: query,
+      containerTags: [CONTAINERS.COMPANY],
+    })
+    return (res.results || [])
+      .map((m: any) => m.content || m.document?.content || m.chunks?.map((c: any) => c.content).join('\n') || '')
+      .filter(Boolean)
+      .join('\n')
+  } catch (err: any) {
+    console.warn('[supermemory] getCompanyContext failed:', err.message)
+    return ''
+  }
+}
+
+// ── WRITE: Store live negotiation outcome ─────────────
+export async function storeNegotiationMemory(params: {
+  supplierName: string
+  region: string
+  outcome: string
+  quotedPrice: number | null
+  leadTimeDays: number | null
+  certifications: string[]
+  callId: string
+}): Promise<void> {
+  const client = getClient()
+  if (!client) { console.log('[supermemory] store skipped — no key'); return }
+
+  const content =
+    `Supplier ${params.supplierName} in ${params.region}: ` +
+    `quoted $${params.quotedPrice || 'none'}/unit, ` +
+    `lead time ${params.leadTimeDays || 'TBD'} days, ` +
+    `outcome: ${params.outcome}, ` +
+    `certifications: ${params.certifications.join(', ') || 'none'}. ` +
+    `Call ID: ${params.callId}`
+
+  try {
+    await client.add({
+      content,
+      containerTags: [
+        CONTAINERS.NEGOTIATIONS,
+        `supplier-${params.supplierName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+      ],
+      metadata: {
+        supplier: params.supplierName,
+        region: params.region,
+        outcome: params.outcome,
+        ...(params.quotedPrice !== null ? { quoted_price: params.quotedPrice } : {}),
+        call_id: params.callId,
+      },
+    })
+    console.log('[supermemory] stored negotiation memory for', params.supplierName)
+  } catch (err: any) {
+    console.warn('[supermemory] store failed:', err.message)
+  }
+}
+
+function getMockMemories(name: string, reg?: string): string {
+  const r = reg || 'West Africa'
+  return [
+    `[Memory] Supplier ${name} in ${r}: initial ask $10/unit, settled $8.40 after Twi-language negotiation. Accepts Mobile Money.`,
+    `[Memory] ${name} lead times are padded by ~20%. Stated 8 weeks, delivered in 6.`,
+    `[Memory] ${name} holds AGOA certification. Verified via Ghana Standards Authority.`,
+  ].join('\n')
+}

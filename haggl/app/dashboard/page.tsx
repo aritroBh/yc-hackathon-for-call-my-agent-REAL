@@ -28,6 +28,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [spongeConnected, setSpongeConnected] = useState<boolean | null>(null);
+  const [spongeTxCount, setSpongeTxCount] = useState<number>(0);
+
   const [demoLoading, setDemoLoading] = useState(false);
   const [rlLoading, setRlLoading] = useState(false);
   const [rlResult, setRlResult] = useState<string | null>(null);
@@ -93,11 +96,28 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const fetchSpongeStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/sponge/status");
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setSpongeConnected(data.connected);
+      setSpongeTxCount(data.transactionCount || 0);
+    } catch {
+      setSpongeConnected(false);
+      setSpongeTxCount(0);
+    }
+  }, []);
+
   useEffect(() => {
     fetchCalls();
-    const interval = setInterval(fetchCalls, 10000);
+    fetchSpongeStatus();
+    const interval = setInterval(() => {
+      fetchCalls();
+      fetchSpongeStatus();
+    }, 10000);
     return () => clearInterval(interval);
-  }, [fetchCalls]);
+  }, [fetchCalls, fetchSpongeStatus]);
 
   useEffect(() => {
     if (!socket) return;
@@ -215,6 +235,20 @@ export default function DashboardPage() {
               <span className="w-2 h-2 bg-gray-300 rounded-full" />
               Offline
             </span>
+          )}
+
+          {spongeConnected !== null && (
+            spongeConnected ? (
+              <span className="flex items-center gap-1.5 text-sm font-medium text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-full border border-indigo-100 shadow-sm animate-pulse-slow">
+                <span className="w-2 h-2 bg-indigo-500 rounded-full" />
+                Sponge Wallet: Connected | {spongeTxCount} {spongeTxCount === 1 ? 'transaction' : 'transactions'}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-sm font-medium text-gray-400 bg-gray-50 px-2.5 py-1 rounded-full border border-gray-100">
+                <span className="w-2 h-2 bg-gray-300 rounded-full" />
+                Sponge Wallet: Disconnected
+              </span>
+            )
           )}
         </div>
       </div>

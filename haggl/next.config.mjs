@@ -3,6 +3,8 @@ const nextConfig = {
   output: process.env.NODE_ENV === "production" ? "standalone" : undefined,
   poweredByHeader: false,
   productionBrowserSourceMaps: false,
-  experimental: {},
+  experimental: {
+    serverComponentsExternalPackages: ["@moss-dev/moss", "@moss-dev/moss-core"],
+  },
 };
 export default nextConfig;

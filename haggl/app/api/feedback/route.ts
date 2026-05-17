@@ -3,7 +3,7 @@ import { z } from "zod";
 import { tables, getRFQById, getSupplierById, getDecryptedFloorPrice, listCallsByRFQ } from "@/lib/db";
 import { FeedbackCreateSchema } from "@/lib/validators";
 import { computeActualSavings } from "@/lib/patternExtraction";
-import { initiatePayment, initiateSpongePayment } from "@/lib/sponsors/sponge";
+import { recordDealInSponge } from "@/lib/sponsors/sponge";
 import { createPaymentLink, recordSavingsEvent } from "@/lib/sponsors/stripe";
 import { fillTradeDocuments } from "@/lib/sponsors/browseruse";
 import type { FeedbackRow, CallRow } from "@/types/database";
@@ -170,12 +170,11 @@ async function handleAward(request: NextRequest): Promise<NextResponse> {
   let spongePayment = null;
   if (quotedPrice && quotedPrice > 0) {
     try {
-      spongePayment = await initiateSpongePayment({
+      spongePayment = await recordDealInSponge({
+        rfqId: rfq.id,
+        supplierName: supplier.name,
         amount: quotedPrice,
-        currency: rfq.currency || "USD",
-        recipientName: supplier.name,
-        recipientEmail: supplier.email || "supplier@example.com",
-        memo: `HAGGL payment for RFQ: ${rfq.title}`,
+        currency: rfq.currency || 'USD',
         callId: successfulCall?.id || "manual-award",
       });
     } catch (err: any) {
