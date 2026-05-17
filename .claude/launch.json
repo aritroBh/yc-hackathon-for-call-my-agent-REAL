@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "haggl",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd haggl && ENABLE_AUTH=false npm run dev"],
+      "port": 3000,
+      "autoPort": true
+    }
+  ]
+}
