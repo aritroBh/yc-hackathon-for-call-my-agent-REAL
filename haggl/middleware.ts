@@ -5,10 +5,16 @@ export const PUBLIC_ROUTES = [
   "/api/auth",
   "/api/health",
   "/api/calls/stream",
+  // Vapi calls these from its cloud (custom-llm / custom-voice / server webhook)
+  // — must be unauthenticated for the integration to work.
+  "/api/vapi",
+  // Demo data seeder (POC testing).
+  "/api/demo",
   "/_next",
   "/favicon.ico",
   "/login",
   "/signup",
+  "/design",
 ];
 
 export const AUTH_CONFIG = {

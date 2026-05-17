@@ -17,8 +17,10 @@ import type {
 } from "@/types/database";
 
 // ── In-Memory Database Fallback for Offline Demo ──────────
+// Pinned to globalThis so all Next.js route bundles (each a separate webpack
+// bundle in dev) share ONE in-memory DB instance within the Node process.
 
-const mockDbState = {
+const mockDbState = ((globalThis as any).__hagglMockDb ??= {
   users: [
     {
       id: "00000000-0000-0000-0000-000000000001",
@@ -84,7 +86,7 @@ const mockDbState = {
   dispatch_sessions: [] as any[],
   queue_entries: [] as any[],
   learned_patterns: [] as any[]
-};
+});
 
 class MockQueryBuilder {
   private tableName: string;
@@ -113,7 +115,7 @@ class MockQueryBuilder {
     // Handle standard relationship joins
     if (dbKey === "rfq_suppliers") {
       this.data.forEach(rs => {
-        rs.supplier = mockDbState.suppliers.find(s => s.id === rs.supplier_id) || null;
+        rs.supplier = mockDbState.suppliers.find((s: any) => s.id === rs.supplier_id) || null;
       });
     }
   }
@@ -206,6 +208,39 @@ class MockQueryBuilder {
         };
       },
       then: (resolve: any) => resolve({ data: affected, error: null })
+    };
+    return chain;
+  }
+
+  upsert(payload: any, opts?: { onConflict?: string }) {
+    const records = Array.isArray(payload) ? payload : [payload];
+    const result: any[] = [];
+    const conflictKey = opts?.onConflict;
+    records.forEach(rec => {
+      const existing =
+        conflictKey && rec[conflictKey] !== undefined
+          ? this.data.find(item => item[conflictKey] === rec[conflictKey])
+          : undefined;
+      if (existing) {
+        Object.assign(existing, rec);
+        result.push(existing);
+      } else {
+        const newRec = {
+          id: rec.id || Math.random().toString(36).substr(2, 9),
+          created_at: new Date().toISOString(),
+          ...rec,
+        };
+        this.data.push(newRec);
+        result.push(newRec);
+      }
+    });
+
+    const chain = {
+      select: () => ({
+        single: async () => ({ data: result[0], error: null }),
+        then: (resolve: any) => resolve({ data: result, error: null }),
+      }),
+      then: (resolve: any) => resolve({ data: result, error: null }),
     };
     return chain;
   }
