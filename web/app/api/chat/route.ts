@@ -40,7 +40,7 @@ export async function POST(req: Request) {
     messages = Array.isArray(body?.messages) ? body.messages : [];
   } catch {
     return NextResponse.json(
-      { ok: false, text: "Could not read your message — try again.", readyToCall: false },
+      { ok: false, text: "Could not read your message - try again.", readyToCall: false },
       { status: 200 },
     );
   }
@@ -66,7 +66,7 @@ export async function POST(req: Request) {
   try {
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
+      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
       contents,
       config: {
         systemInstruction: SYSTEM,
@@ -79,7 +79,7 @@ export async function POST(req: Request) {
     const readyToCall = /READY_TO_CALL/.test(raw);
     const text =
       raw.replace(/READY_TO_CALL/g, "").trim() ||
-      "Got it — let me line up suppliers.";
+      "Got it - let me line up suppliers.";
 
     return NextResponse.json({ ok: true, text, readyToCall }, { status: 200 });
   } catch (err) {
@@ -87,7 +87,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         ok: false,
-        text: "I hit a snag reaching my language model — give me a moment and try again.",
+        text: "I hit a snag reaching my language model - give me a moment and try again.",
         readyToCall: false,
       },
       { status: 200 },

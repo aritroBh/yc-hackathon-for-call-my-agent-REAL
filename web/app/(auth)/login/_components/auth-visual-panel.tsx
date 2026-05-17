@@ -1,16 +1,26 @@
+/**
+ * Warm route-map visual - San Diego routing to overseas suppliers.
+ * Coordinates mirror pencil-new.pen (Variation B · "B1 · Sign in").
+ * Dot centers sit exactly on each arc's endpoint; label x/y are the
+ * text box top-left (rendered with a text-before-edge baseline so the
+ * pen's top-left coordinates map directly).
+ */
+
+const ORIGIN = { cx: 69.5, cy: 309.5, r: 7.5 };
+const ORIGIN_LABEL = { content: "San Diego, US", x: 42, y: 326 };
+
 const NODES = [
-  { cx: 423, cy: 353, label: "Lagos · Yoruba", lx: 441, ly: 348 },
-  { cx: 393, cy: 493, label: "Accra · Twi", lx: 300, ly: 512, anchor: "end" as const },
-  { cx: 354, cy: 200, label: "Erode · Hindi", lx: 376, ly: 195 },
+  { cx: 428.5, cy: 358.5, r: 5.5, label: "Lagos · Yoruba", lx: 441, ly: 348 },
+  { cx: 398.5, cy: 498.5, r: 5.5, label: "Accra · Twi", lx: 300, ly: 512 },
+  { cx: 359.5, cy: 199.5, r: 5.5, label: "Erode · Hindi", lx: 376, ly: 189 },
 ];
 
 const ARCS = [
-  "M70 250 Q 240 90 430 300",
-  "M70 250 Q 200 280 400 440",
-  "M70 250 Q 215 55 360 140",
+  { d: "M70 310 Q 240 150 430 360", opacity: 0.4 },
+  { d: "M70 310 Q 200 340 400 500", opacity: 0.3 },
+  { d: "M70 310 Q 215 115 360 200", opacity: 0.35 },
 ];
 
-/** Warm route-map visual — San Diego routing to overseas suppliers. */
 export function AuthVisualPanel() {
   return (
     <div className="relative hidden flex-col overflow-hidden bg-surface-2 p-14 lg:flex">
@@ -23,38 +33,46 @@ export function AuthVisualPanel() {
 
       <div className="relative flex-1">
         <svg
-          viewBox="0 0 488 560"
+          viewBox="0 0 560 560"
           className="absolute inset-0 size-full"
           fill="none"
           preserveAspectRatio="xMidYMid meet"
         >
-          {ARCS.map((d, i) => (
+          {ARCS.map((arc, i) => (
             <path
               key={i}
-              d={d}
+              d={arc.d}
               stroke="var(--clay)"
               strokeWidth="1.5"
               strokeLinecap="round"
-              opacity={i === 0 ? 0.42 : 0.32}
+              opacity={arc.opacity}
             />
           ))}
-          <circle cx="70" cy="250" r="7.5" fill="var(--clay)" />
+
+          <circle
+            cx={ORIGIN.cx}
+            cy={ORIGIN.cy}
+            r={ORIGIN.r}
+            fill="var(--clay)"
+          />
           <text
-            x="50"
-            y="278"
+            x={ORIGIN_LABEL.x}
+            y={ORIGIN_LABEL.y}
+            dominantBaseline="text-before-edge"
             className="font-mono"
             fontSize="12"
             fill="var(--ink-2)"
           >
-            San Diego, US
+            {ORIGIN_LABEL.content}
           </text>
+
           {NODES.map((n) => (
             <g key={n.label}>
-              <circle cx={n.cx} cy={n.cy} r="5.5" fill="var(--clay)" />
+              <circle cx={n.cx} cy={n.cy} r={n.r} fill="var(--clay)" />
               <text
                 x={n.lx}
                 y={n.ly}
-                textAnchor={n.anchor ?? "start"}
+                dominantBaseline="text-before-edge"
                 className="font-mono"
                 fontSize="12"
                 fill="var(--ink-2)"
@@ -68,7 +86,7 @@ export function AuthVisualPanel() {
 
       <figure className="flex flex-col gap-3">
         <blockquote className="font-display text-[22px] italic leading-snug text-ink">
-          “It closed eleven supplier deals across Lagos before lunch — and
+          “It closed eleven supplier deals across Lagos before lunch - and
           every call was in Yoruba.”
         </blockquote>
         <figcaption className="font-mono text-xs text-ink-3">
