@@ -62,19 +62,40 @@ export default function MonitorPage() {
       }
 
       setRfqTitle(data.title || "");
-      setCalls(
-        (data.calls || []).map((c: any) => {
-          const s = supplierMap.get(c.supplier_id);
-          return {
-            id: c.id,
-            supplier_id: c.supplier_id,
-            supplier_name: s?.name || "Unknown supplier",
-            phone: s?.phone || "",
-            status: c.status,
-            transcript: Array.isArray(c.transcript) ? c.transcript : [],
-          };
-        }),
+      const callList = (data.calls || []).map((c: any) => {
+        const s = supplierMap.get(c.supplier_id);
+        return {
+          id: c.id,
+          supplier_id: c.supplier_id,
+          supplier_name: s?.name || "Unknown supplier",
+          phone: s?.phone || "",
+          status: c.status,
+          transcript: Array.isArray(c.transcript) ? c.transcript : [],
+        };
+      });
+      setCalls(callList);
+
+      // Hydrate the intel panel with traces already persisted for these calls
+      // (e.g. the seeded demo). Live traces still arrive via the socket.
+      const traceRows = await Promise.all(
+        callList.map((c: CallEntry) =>
+          fetch(`/api/calls/${c.id}/traces`)
+            .then((r) => (r.ok ? r.json() : []))
+            .catch(() => []),
+        ),
       );
+      const hydrated: Trace[] = traceRows
+        .flat()
+        .filter((row: any) => row && !row.error)
+        .map((row: any) => ({
+          callId: row.call_id,
+          data: row.output_data || {},
+          claim: row.input_data?.supplier_turn,
+          timestamp: row.created_at,
+        }))
+        .sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""))
+        .slice(0, 20);
+      if (hydrated.length) setTraces(hydrated);
     } catch {
       /* best-effort — socket events will still flow */
     }

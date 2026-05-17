@@ -10,7 +10,7 @@ export async function GET(
 
     const { data, error } = await tables.reasoning_traces
       .select("*")
-      .eq("input_data->>call_id", callId)
+      .eq("call_id", callId)
       .order("created_at", { ascending: false })
       .limit(50);
 

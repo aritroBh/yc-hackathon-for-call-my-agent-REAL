@@ -30,6 +30,8 @@ export function getLocaleForLanguage(lang: string | unknown): string {
   const clean = lang.toLowerCase().trim();
   if (clean === "twi" || clean === "akan" || clean === "tw-gh") return "tw-GH";
   if (clean === "yoruba" || clean === "yo-ng") return "yo-NG";
+  if (clean === "hindi" || clean === "hi" || clean === "hi-in") return "hi-IN";
+  if (clean === "tamil" || clean === "si-in") return "si-IN";
   return "en-US";
 }
 
@@ -223,12 +225,19 @@ export function buildNegotiationPromptForLanguage(
   });
 
   let prompt = builderOutput.systemPrompt;
-  if (dialectContext?.locale === "tw-GH" || dialectContext?.locale === "yo-NG") {
-    const languageName = dialectContext.locale === "tw-GH" ? "Twi / Akan" : "Yoruba";
+  const nativeLanguages: Record<string, string> = {
+    "tw-GH": "Twi / Akan",
+    "yo-NG": "Yoruba",
+    "hi-IN": "Hindi",
+    "si-IN": "Tamil / South Indian English",
+  };
+  const langName = dialectContext?.locale ? nativeLanguages[dialectContext.locale] : null;
+  if (langName) {
+    const isHindi = dialectContext?.locale === "hi-IN";
     prompt =
-      `LANGUAGE INSTRUCTION: You MUST speak exclusively in ${languageName} throughout this call.
+      `LANGUAGE INSTRUCTION: You MUST speak exclusively in ${langName} throughout this call.
 Do not translate to English. Do not code-switch unless the supplier does first.
-Use natural, fluent ${languageName} including idioms, proverbs, and culturally appropriate phrases.
+Use natural, fluent ${langName} including ${isHindi ? "Hindi idioms, 'ji' honorific, indirect phrasing" : "idioms, proverbs, and culturally appropriate phrases"}.
 Your goal is to make the supplier feel they are speaking with someone who genuinely knows their culture.
 
 ` + prompt;

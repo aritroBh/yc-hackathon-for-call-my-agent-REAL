@@ -49,32 +49,64 @@ export async function createVapiAssistant(
   const llmUrl = `${APP_URL}/api/vapi/llm/${encodeURIComponent(params.hagglCallId)}`;
   const voiceUrl = `${APP_URL}/api/vapi/voice?hcid=${encodeURIComponent(params.hagglCallId)}`;
 
+  const isGhanaian = ["twi", "akan", "tw-gh", "tw-GH"].some(
+    (v) => params.language.toLowerCase() === v.toLowerCase()
+  );
+  const isHindi = ["hindi", "hi", "hi-in", "hi-IN"].some(
+    (v) => params.language.toLowerCase() === v.toLowerCase()
+  );
+
+  const transcriber = isGhanaian
+    ? {
+        provider: "custom-transcriber" as const,
+        server: { url: `${BRIDGE_WS_URL}/vapi/transcriber` },
+      }
+    : isHindi
+    ? {
+        provider: "deepgram" as const,
+        model: "nova-2",
+        language: "hi",
+        smartFormat: true,
+      }
+    : {
+        provider: "deepgram" as const,
+        model: "nova-2",
+        language: "en-US",
+        smartFormat: true,
+      };
+
+  const voice = isGhanaian
+    ? {
+        provider: "custom-voice" as const,
+        server: { url: voiceUrl },
+      }
+    : isHindi
+    ? {
+        provider: "azure" as const,
+        voiceId: "hi-IN-MadhurNeural",
+        speed: 0.95,
+      }
+    : {
+        provider: "azure" as const,
+        voiceId: "en-US-AndrewMultilingualNeural",
+      };
+
   const body = {
     name: params.name,
     firstMessage: params.beginMessage,
-    transcriber: {
-      provider: "custom-transcriber",
-      server: { url: `${BRIDGE_WS_URL}/vapi/transcriber` },
-    },
+    transcriber,
     model: {
       provider: "custom-llm",
-      // Label only — provider is custom-llm so our endpoint (Gemini) handles it.
       model: process.env.GEMINI_MODEL || "gemini-3.1-flash-lite",
       url: llmUrl,
       metadataSendMode: "off",
       messages: [{ role: "system", content: params.systemPrompt }],
       temperature: 0.7,
     },
-    voice: {
-      provider: "custom-voice",
-      server: { url: voiceUrl },
-    },
+    voice,
     server: { url: `${APP_URL}/api/vapi/webhook` },
     metadata: { haggl_call_id: params.hagglCallId },
     endCallFunctionEnabled: false,
-    // Vapi counts silence from the last USER utterance; Khaya batch ASR/TTS
-    // + a long agent turn can exceed 30s between user turns. Keep it high so
-    // the call doesn't hang up mid-negotiation.
     silenceTimeoutSeconds: 120,
     maxDurationSeconds: 480,
   };
@@ -116,9 +148,13 @@ export async function createVapiCall(
   params: VapiOutboundCallParams
 ): Promise<{ vapiCallId: string }> {
   if (!PHONE_NUMBER_ID) {
-    throw new Error(
-      "VAPI_PHONE_NUMBER_ID is not configured — import a Twilio/Vonage number in the Vapi dashboard"
+    logger.warn(
+      "VAPI_PHONE_NUMBER_ID not set — outbound call dispatch skipped. Import a number in the Vapi dashboard to place real calls.",
+      { callId: params.callId, metadata: { toPhone: params.toPhone } }
     );
+    // Return a mock id so the worker doesn't crash. The call stays in its
+    // pre-dial state and is reaped by the existing timeout handler.
+    return { vapiCallId: `mock_call_${Date.now()}` };
   }
 
   const body = {
