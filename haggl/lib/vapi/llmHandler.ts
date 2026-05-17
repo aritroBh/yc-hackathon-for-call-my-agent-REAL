@@ -69,8 +69,11 @@ export async function handleVapiLlm(req: Request, hagglCallIdHint: string): Prom
 
   const encoder = new TextEncoder();
 
+  console.log(`[vapi-llm] user: "${supplierText}" (hcid=${hagglCallId || "?"}, history=${history.length})`);
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      let agentText = "";
       try {
         controller.enqueue(encoder.encode(sseChunk(model, { role: "assistant" }, null)));
 
@@ -78,6 +81,7 @@ export async function handleVapiLlm(req: Request, hagglCallIdHint: string): Prom
         for await (const ev of runNegotiationTurn({ hagglCallId, supplierText, history })) {
           if (ev.type === "delta" && ev.text) {
             produced = true;
+            agentText += ev.text;
             controller.enqueue(encoder.encode(sseChunk(model, { content: ev.text }, null)));
           }
         }
@@ -87,8 +91,10 @@ export async function handleVapiLlm(req: Request, hagglCallIdHint: string): Prom
         }
         controller.enqueue(encoder.encode(sseChunk(model, {}, "stop")));
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        console.log(`[vapi-llm] agent: "${agentText}"`);
       } catch (err: any) {
         console.error("[Vapi custom-llm] turn error:", err?.message);
+        if (agentText) console.log(`[vapi-llm] agent(partial): "${agentText}"`);
         // Neutral pause — the TTS voice (Azure Hindi / Khaya Twi) renders this
         // in the call's own language. A hardcoded phrase would speak the wrong
         // language to the supplier.

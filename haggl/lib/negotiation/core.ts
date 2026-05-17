@@ -25,6 +25,16 @@ import { getDispatcher } from "@/lib/dispatcher";
 const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
 
+// Per-call live conversation history. Vapi sends NO history for custom-voice
+// assistants, and the seeded demo call's DB transcript is a PRE-COMPLETED
+// negotiation — using either makes Gemini re-greet or think the deal is done.
+// So we keep our own per-hcid history that starts empty and holds ONLY this
+// call's real turns. globalThis-pinned so it's shared across Next route bundles.
+type Turn = { role: "user" | "model"; text: string };
+const liveHistory: Map<string, Turn[]> = ((globalThis as any).__hagglLiveHistory ??=
+  new Map());
+const MAX_HISTORY_TURNS = 24;
+
 export function getLocaleForLanguage(lang: string | unknown): string {
   if (typeof lang !== "string") return "en-US";
   const clean = lang.toLowerCase().trim();
@@ -271,7 +281,6 @@ export async function* runNegotiationTurn(
   input: NegotiationTurnInput
 ): AsyncGenerator<NegotiationTurnEvent> {
   const { hagglCallId, supplierText } = input;
-  const history = input.history || [];
 
   // 1. Load call context from DB
   const call = hagglCallId ? await getCallById(hagglCallId) : null;
@@ -284,6 +293,10 @@ export async function* runNegotiationTurn(
     yield { type: "done", hangup: false };
     return;
   }
+
+  // Per-call live history (see liveHistory note above) — NOT the seeded
+  // DB transcript and NOT Vapi's (empty) history.
+  const convo: Turn[] = liveHistory.get(hagglCallId) || [];
 
   // Persist supplier utterance + push to dashboard
   if (hagglCallId && supplierText) {
@@ -319,14 +332,13 @@ export async function* runNegotiationTurn(
   let accruedAgentText = "";
   let shouldHangup = false;
 
-  // Gemini conversation history: agent/assistant => "model", else "user".
+  // Gemini history must start with a user turn — trim any leading model turns.
+  const mappedHistory = convo.map((h) => ({ role: h.role, parts: [{ text: h.text }] }));
+  while (mappedHistory.length && mappedHistory[0].role === "model") {
+    mappedHistory.shift();
+  }
   const contents = [
-    ...history.map((h) => ({
-      role: h.role === "agent" || h.role === "assistant" ? "model" : "user",
-      parts: [
-        { text: typeof h.content === "string" ? h.content : JSON.stringify(h.content) },
-      ],
-    })),
+    ...mappedHistory,
     { role: "user", parts: [{ text: supplierText }] },
   ];
 
@@ -432,6 +444,13 @@ export async function* runNegotiationTurn(
         timestamp: new Date().toISOString(),
       },
     });
+  }
+
+  // Append this turn to the per-call live history (capped) for continuity.
+  if (hagglCallId && supplierText) {
+    convo.push({ role: "user", text: supplierText });
+    if (accruedAgentText) convo.push({ role: "model", text: accruedAgentText });
+    liveHistory.set(hagglCallId, convo.slice(-MAX_HISTORY_TURNS));
   }
 
   yield { type: "done", hangup: shouldHangup };
