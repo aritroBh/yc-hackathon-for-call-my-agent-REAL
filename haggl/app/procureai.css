@@ -454,3 +454,31 @@
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* ---------- skeleton / loading placeholder ---------- */
+@keyframes pa-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.pa-skel {
+  display: block;
+  background: linear-gradient(
+    90deg,
+    var(--surface-inset) 25%,
+    var(--line-2) 37%,
+    var(--surface-inset) 63%
+  );
+  background-size: 200% 100%;
+  animation: pa-shimmer 1.5s ease-in-out infinite;
+  border-radius: 6px;
+}
+.pa-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--ink-4);
+  font-size: 12.5px;
+  text-align: center;
+}
