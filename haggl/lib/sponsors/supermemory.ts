@@ -47,7 +47,12 @@ export async function getSupplierMemory(
     if (all.length === 0) return getMockMemories(supplierName, region)
 
     return all
-      .map((m: any) => m.content || m.document?.content || m.chunks?.map((c: any) => c.content).join('\n') || '')
+      .map((m: any) => {
+        if (m.chunks && Array.isArray(m.chunks) && m.chunks.length > 0) {
+          return m.chunks.map((c: any) => c.content).filter(Boolean).join(' ')
+        }
+        return m.content || m.document?.content || ''
+      })
       .filter(Boolean)
       .join('\n')
   } catch (err: any) {
@@ -67,7 +72,12 @@ export async function getLanguageContext(locale: string): Promise<string> {
       containerTags: [CONTAINERS.LANGUAGES],
     })
     return (res.results || [])
-      .map((m: any) => m.content || m.document?.content || m.chunks?.map((c: any) => c.content).join('\n') || '')
+      .map((m: any) => {
+        if (m.chunks && Array.isArray(m.chunks) && m.chunks.length > 0) {
+          return m.chunks.map((c: any) => c.content).filter(Boolean).join(' ')
+        }
+        return m.content || m.document?.content || ''
+      })
       .filter(Boolean)
       .join('\n')
   } catch (err: any) {
@@ -87,7 +97,12 @@ export async function getCompanyContext(query: string): Promise<string> {
       containerTags: [CONTAINERS.COMPANY],
     })
     return (res.results || [])
-      .map((m: any) => m.content || m.document?.content || m.chunks?.map((c: any) => c.content).join('\n') || '')
+      .map((m: any) => {
+        if (m.chunks && Array.isArray(m.chunks) && m.chunks.length > 0) {
+          return m.chunks.map((c: any) => c.content).filter(Boolean).join(' ')
+        }
+        return m.content || m.document?.content || ''
+      })
       .filter(Boolean)
       .join('\n')
   } catch (err: any) {
@@ -120,10 +135,7 @@ export async function storeNegotiationMemory(params: {
   try {
     await client.add({
       content,
-      containerTags: [
-        CONTAINERS.NEGOTIATIONS,
-        `supplier-${params.supplierName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
-      ],
+      containerTag: CONTAINERS.NEGOTIATIONS,
       metadata: {
         supplier: params.supplierName,
         region: params.region,

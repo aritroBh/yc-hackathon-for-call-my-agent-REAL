@@ -22,6 +22,8 @@
     "docker:build": "docker build -t haggl .",
     "docker:run": "docker compose up",
     "seed:demo": "tsx scripts/generate-seed.ts",
+    "seed:memory": "tsx scripts/seed-supermemory.ts",
+    "seed:check": "curl -X POST http://localhost:3000/api/supermemory/seed",
     "validate:env": "tsx -e \"require('./lib/env').validateEnv()\""
   },
   "dependencies": {

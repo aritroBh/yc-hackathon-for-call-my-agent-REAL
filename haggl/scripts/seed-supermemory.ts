@@ -182,7 +182,7 @@ async function seedContainer(
     try {
       await client.add({
         content: mem.content,
-        containerTags: [containerTag],
+        containerTag: containerTag,
         metadata: mem.metadata,
       })
       success++
