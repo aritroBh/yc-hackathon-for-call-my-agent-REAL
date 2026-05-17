@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const BASE_URL = process.env.BROWSER_USE_BASE_URL || "https://api.browser-use.com/api/v3";
+const BASE_URL = process.env.BROWSER_USE_BASE_URL || "https://api.browser-use.com/api/v1";
 const API_KEY = process.env.BROWSER_USE_API_KEY;
 
 export interface ResearchResult {
@@ -51,8 +51,20 @@ export async function researchSupplier(
 
   try {
     const { data } = await axios.post(
-      `${BASE_URL}/run`,
-      { task: taskPrompt },
+      `${BASE_URL}/run-task`,
+      { 
+        task: taskPrompt,
+        structured_output_json: {
+          type: "object",
+          properties: {
+            website: { type: "string" },
+            recentNews: { type: "array", items: { type: "string" } },
+            estimatedPriceRange: { type: "string" },
+            certifications: { type: "array", items: { type: "string" } },
+            redFlags: { type: "array", items: { type: "string" } }
+          }
+        }
+      },
       {
         headers: {
           Authorization: `Bearer ${API_KEY}`,

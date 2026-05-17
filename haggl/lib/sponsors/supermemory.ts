@@ -62,21 +62,18 @@ export async function storeNegotiationMemory(params: {
   const content = `Supplier ${params.supplierName} in ${params.region}: quoted $${params.quotedPrice || "none"}, lead time ${params.leadTimeDays || "TBD"} days, outcome: ${params.outcome}`;
   try {
     await axios.post(
-      `${BASE}/memories`,
+      `${BASE}/documents`,
       { 
-        memories: [{ 
-          content, 
-          isStatic: false,
-          metadata: {
-            supplier_id: params.supplierName,
-            region: params.region,
-            outcome: params.outcome,
-            quoted_price: params.quotedPrice,
-            lead_time_days: params.leadTimeDays,
-            certifications: params.certifications,
-            call_id: params.callId
-          }
-        }]
+        content, 
+        metadata: {
+          supplier_id: params.supplierName,
+          region: params.region,
+          outcome: params.outcome,
+          quoted_price: params.quotedPrice,
+          lead_time_days: params.leadTimeDays,
+          certifications: params.certifications,
+          call_id: params.callId
+        }
       },
       {
         headers: {

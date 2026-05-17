@@ -13,8 +13,8 @@ export async function mossSearch(query: string, topK = 3): Promise<MossResult[]>
   if (!API_KEY) return [];
   try {
     const { data } = await axios.post(
-      `${MOSS_BASE}/search`,
-      { query, top_k: topK },
+      `${MOSS_BASE}/v1/search`,
+      { query, limit: topK },
       { headers: { Authorization: `Bearer ${API_KEY}` }, timeout: 3000 },
     );
     return data.results || [];
