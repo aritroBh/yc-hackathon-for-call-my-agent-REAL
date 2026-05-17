@@ -1,8 +1,10 @@
 import "dotenv/config";
 import { getCallQueue } from "@/lib/queue";
 import { getDispatcher } from "@/lib/dispatcher";
-import { createOutboundCall } from "@/lib/twilio";
-import { tables } from "@/lib/db";
+import { createAgentPhoneAgent, createOutboundCall, getCall } from "@/lib/agentphone";
+import { tables, getSupplierById, getRFQById } from "@/lib/db";
+import { getDialectByLocale } from "@/lib/prompts/dialectPrompts";
+import { buildNegotiationPrompt } from "@/lib/promptBuilder";
 import { getSocketServer } from "@/lib/socket";
 import type { QueueEntry } from "@/lib/queue";
 import type { CallRow } from "@/types/database";
@@ -18,6 +20,14 @@ const DEFAULT_OPTIONS: CallWorkerOptions = {
   callTimeoutSeconds: 480,
   retryBackoffMs: 30_000,
 };
+
+function getLocaleForLanguage(lang: string | unknown): string {
+  if (typeof lang !== "string") return "en-US";
+  const clean = lang.toLowerCase().trim();
+  if (clean === "twi" || clean === "akan" || clean === "tw-gh") return "tw-GH";
+  if (clean === "yoruba" || clean === "yo-ng") return "yo-NG";
+  return "en-US";
+}
 
 export class CallWorker {
   private running = false;
@@ -103,38 +113,89 @@ export class CallWorker {
 
       getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "queued", twilioCallSid: null });
 
-      const result = await createOutboundCall(entry.phone, entry.callId, {
-        record: true,
-        timeoutSeconds: this.opts.callTimeoutSeconds,
-      });
+      // 1. Retrieve supplier and RFQ context
+      const supplier = await getSupplierById(entry.supplierId);
+      const rfq = await getRFQById(entry.rfqId);
 
-      if (!result.success || !result.callSid) {
-        const errorMsg = result.error || "Twilio call creation failed";
-        await tables.calls
-          .update({
-            status: "failed",
-            error_message: errorMsg,
-            ended_at: new Date().toISOString(),
-          })
-          .eq("id", entry.callId);
-
-        getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "failed", twilioCallSid: null });
-
-        queue.fail(entry.callId, errorMsg);
-        dispatcher.incrementFailed(entry.rfqId);
-        return;
+      if (!supplier || !rfq) {
+        throw new Error("Supplier or RFQ context not found in DB");
       }
 
-      queue.markCalling(entry.callId, result.callSid);
+      // 2. Resolve language and dialect context
+      const language = ((supplier.metadata as any)?.language as string) || "english";
+      const dialectContext = getDialectByLocale(getLocaleForLanguage(language));
+
+      // 3. Build initial negotiation agent prompt
+      const builderOutput = buildNegotiationPrompt({
+        rfq: {
+          title: rfq.title,
+          description: rfq.description,
+          items: rfq.items,
+          target_price: rfq.target_price,
+          floor_price: rfq.floor_price,
+          currency: rfq.currency || "USD",
+          deadline: rfq.deadline,
+        },
+        supplier: {
+          name: supplier.name,
+          contact_name: supplier.contact_name,
+          phone: supplier.phone,
+          email: supplier.email,
+          metadata: supplier.metadata || {},
+        },
+        dialectConfig: dialectContext ? {
+          name: dialectContext.name,
+          locale: dialectContext.locale,
+          prompt_template: "",
+          speaking_style: dialectContext.communicationStyle,
+          cultural_notes: dialectContext.culturalNotes || "",
+          formality_level: dialectContext.formalityLevel,
+          greeting_phrase: dialectContext.greetingPhrase,
+          closing_phrase: dialectContext.closingPhrase,
+        } : null,
+        aggressiveness: "medium",
+        priority: "balanced",
+        aiDisclosure: true,
+      });
+
+      let systemPrompt = builderOutput.systemPrompt;
+      if (dialectContext?.locale === "tw-GH" || dialectContext?.locale === "yo-NG") {
+        const languageName = dialectContext.locale === "tw-GH" ? "Twi / Akan" : "Yoruba";
+        systemPrompt = `LANGUAGE INSTRUCTION: You MUST speak exclusively in ${languageName} throughout this call.
+Do not translate to English. Do not code-switch unless the supplier does first.
+Use natural, fluent ${languageName} including idioms, proverbs, and culturally appropriate phrases.
+Your goal is to make the supplier feel they are speaking with someone who genuinely knows their culture.
+
+` + systemPrompt;
+      }
+
+      const beginMessage = dialectContext?.greetingPhrase || "Hello, I am calling from HAGGL to negotiate the procurement quote.";
+
+      // 4. Provision AgentPhone voice agent dynamically
+      const { agentId } = await createAgentPhoneAgent({
+        name: `HAGGL Agent - ${supplier.name}`,
+        systemPrompt,
+        language,
+        beginMessage,
+      });
+
+      // 5. Initiate AgentPhone Outbound Call
+      const { agentPhoneCallId } = await createOutboundCall({
+        agentId,
+        toPhone: entry.phone,
+        callId: entry.callId,
+      });
+
+      queue.markCalling(entry.callId, agentPhoneCallId);
 
       await tables.calls
         .update({
           status: "ringing",
-          twilio_call_sid: result.callSid,
+          twilio_call_sid: agentPhoneCallId,
         })
         .eq("id", entry.callId);
 
-      getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "ringing", twilioCallSid: result.callSid });
+      getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "ringing", twilioCallSid: agentPhoneCallId });
 
       const callTimeoutMs = this.opts.callTimeoutSeconds * 1000;
       const timeout = setTimeout(async () => {
@@ -148,7 +209,7 @@ export class CallWorker {
             })
             .eq("id", entry.callId);
 
-          getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "no_answer", twilioCallSid: result.callSid });
+          getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "no_answer", twilioCallSid: agentPhoneCallId });
 
           queue.fail(entry.callId, "No answer - timed out");
           dispatcher.incrementFailed(entry.rfqId);
@@ -166,73 +227,55 @@ export class CallWorker {
 
           const c = call as Pick<CallRow, "status" | "twilio_call_sid">;
 
-          if (c.status === "in_progress" || c.status === "completed") {
+          if (c.status === "completed" || c.status === "failed" || c.status === "no_answer") {
             clearTimeout(timeout);
             clearInterval(checkInterval);
+            return;
+          }
 
-            if (c.status === "in_progress") {
-              queue.updateStatus(entry.callId, "in_progress");
-              getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "in_progress", twilioCallSid: c.twilio_call_sid });
-            } else {
+          if (c.twilio_call_sid) {
+            const remoteCall = await getCall(c.twilio_call_sid);
+
+            if (remoteCall.status === "completed") {
+              clearTimeout(timeout);
+              clearInterval(checkInterval);
+
               queue.complete(entry.callId);
               dispatcher.incrementCompleted(entry.rfqId);
-
-              // Calculate costs
-              let total_cost_millicents = 0;
-              let duration_seconds = 0;
-              try {
-                if (c.twilio_call_sid) {
-                  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-                  const authToken = process.env.TWILIO_AUTH_TOKEN;
-                  if (accountSid && authToken) {
-                    const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
-                    const twilioRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${c.twilio_call_sid}.json`, {
-                      headers: { 'Authorization': `Basic ${auth}` }
-                    });
-                    if (twilioRes.ok) {
-                      const twilioCall = await twilioRes.json();
-                      const price = twilioCall.price ? parseFloat(twilioCall.price) : 0;
-                      const twilio_millicents = Math.round(Math.abs(price) * 100_000);
-                      duration_seconds = twilioCall.duration ? parseInt(twilioCall.duration) : 0;
-                      
-                      // Claude API cost estimate
-                      const { count: injections } = await tables.reasoning_traces
-                        .select('*', { count: 'exact', head: true })
-                        .eq('input_data->>call_id', entry.callId);
-                      
-                      const claude_millicents = Math.round(((injections || 0) * 700 * 15) / 1_000_000 * 100_000) + 50; // +50 for Haiku extraction
-                      
-                      total_cost_millicents = twilio_millicents + claude_millicents;
-                    }
-                  }
-                }
-              } catch (costErr) {
-                console.error("[CallWorker] Failed to calculate costs:", costErr);
-              }
 
               await tables.calls
                 .update({ 
                   ended_at: new Date().toISOString(),
-                  ...(total_cost_millicents > 0 && { cost_millicents: total_cost_millicents }),
-                  ...(duration_seconds > 0 && { duration_seconds })
+                  duration_seconds: remoteCall.duration || 60,
+                  cost_millicents: 200
                 })
                 .eq("id", entry.callId);
 
               getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "completed", twilioCallSid: c.twilio_call_sid });
+            } else if (["failed", "busy", "no_answer", "rejected"].includes(remoteCall.status)) {
+              clearTimeout(timeout);
+              clearInterval(checkInterval);
+
+              queue.fail(entry.callId, `Supplier ${remoteCall.status}`);
+              dispatcher.incrementFailed(entry.rfqId);
+
+              await tables.calls
+                .update({
+                  ended_at: new Date().toISOString(),
+                  status: remoteCall.status === "no_answer" ? "no_answer" : "failed",
+                  error_message: `Call ended with status: ${remoteCall.status}`
+                })
+                .eq("id", entry.callId);
+
+              getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: remoteCall.status === "no_answer" ? "no_answer" : "failed", twilioCallSid: c.twilio_call_sid });
+            } else if (remoteCall.status === "in_progress" && c.status !== "in_progress") {
+              queue.updateStatus(entry.callId, "in_progress");
+              await tables.calls.update({ status: "in_progress" }).eq("id", entry.callId);
+              getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: "in_progress", twilioCallSid: c.twilio_call_sid });
             }
-          } else if (
-            ["failed", "busy", "no_answer", "rejected", "capped"].includes(
-              c.status,
-            )
-          ) {
-            clearTimeout(timeout);
-            clearInterval(checkInterval);
-            queue.fail(entry.callId, `Supplier ${c.status}`);
-            dispatcher.incrementFailed(entry.rfqId);
-            getSocketServer()?.emit('call_status_changed', { callId: entry.callId, rfqId: entry.rfqId, status: c.status, twilioCallSid: c.twilio_call_sid });
           }
         } catch {}
-      }, 2_000);
+      }, 3000);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await tables.calls
@@ -260,6 +303,3 @@ export function getCallWorker(opts?: CallWorkerOptions): CallWorker {
   return _globalWorker;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}

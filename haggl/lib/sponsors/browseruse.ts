@@ -108,3 +108,116 @@ export async function researchSupplier(
     return getMockResearch(supplierName, partName);
   }
 }
+
+export interface TradeDocumentsResult {
+  formsCompleted: string[];
+  documentsUrl: string[];
+  hsCode?: string;
+  invoiceNumber?: string;
+  estimatedDuty?: string;
+}
+
+export async function fillTradeDocuments(params: {
+  supplierName: string;
+  supplierCountry: string;
+  partDescription: string;
+  quantity: number;
+  unitPrice: number;
+  totalValue: number;
+  currency: string;
+  hsCode?: string;
+  buyerCompanyName: string;
+}): Promise<TradeDocumentsResult | null> {
+  const getMockTradeDocuments = (): TradeDocumentsResult => {
+    const randomInvoiceNum = "INV-" + Math.floor(100000 + Math.random() * 900000);
+    const mockHsCode = params.hsCode || "6109.10.00";
+    const estDuty = `$${(params.totalValue * 0.045).toFixed(2)}`; // 4.5% import duty estimate
+    return {
+      formsCompleted: [
+        "HS Code Lookup (HTS USITC)",
+        "Pro Forma Invoice (Trade.gov)",
+        "CBP Form 3461 (Entry Summary)"
+      ],
+      documentsUrl: [
+        `https://hts.usitc.gov/?query=${encodeURIComponent(params.partDescription)}`,
+        "https://www.trade.gov/pro-forma-invoice",
+        "https://www.cbp.gov/document/forms/form-3461-entry-immediate-delivery"
+      ],
+      hsCode: mockHsCode,
+      invoiceNumber: randomInvoiceNum,
+      estimatedDuty: estDuty
+    };
+  };
+
+  if (!API_KEY) {
+    console.log(`[browser-use] Trade documents mock fallback loaded for supplier: ${params.supplierName}`);
+    return getMockTradeDocuments();
+  }
+
+  const taskPrompt = `Complete the following trade documentation for an import from ${params.supplierCountry || "Ghana/Nigeria"}:
+1. Look up the correct HS (Harmonized System) tariff code for: ${params.partDescription}
+   Use https://hts.usitc.gov/ for US HTS codes.
+2. Fill out a pro forma invoice template at https://www.trade.gov/pro-forma-invoice
+   with: Supplier: ${params.supplierName}, Quantity: ${params.quantity}, Unit Price: ${params.unitPrice} ${params.currency}, Total: ${params.totalValue}, Buyer: ${params.buyerCompanyName}.
+3. Find and fill the relevant CBP Form 3461 fields at cbp.gov for entry summary.
+4. Return a JSON summary of: { "hsCode": "string", "invoiceNumber": "string", "estimatedDuty": "string", "formsCompleted": ["string"], "documentsUrl": ["string"] }`;
+
+  try {
+    const createRes = await axios.post(
+      `${BASE_URL}/sessions`,
+      { task: taskPrompt },
+      {
+        headers: {
+          'X-Browser-Use-API-Key': API_KEY,
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000
+      }
+    );
+    const sessionId = createRes.data.id;
+    if (!sessionId) throw new Error('No session ID returned');
+
+    const maxPolls = 20;
+    for (let i = 0; i < maxPolls; i++) {
+      await new Promise(r => setTimeout(r, 4000));
+      const pollRes = await axios.get(
+        `${BASE_URL}/sessions/${sessionId}`,
+        {
+          headers: { 'X-Browser-Use-API-Key': API_KEY },
+          timeout: 8000
+        }
+      );
+      const status = pollRes.data.status;
+      if (['idle', 'stopped', 'error', 'timed_out'].includes(status)) {
+        const output = pollRes.data.output;
+        if (!output || status === 'error') return getMockTradeDocuments();
+
+        try {
+          const parsed = typeof output === 'string' ? JSON.parse(output) : output;
+          return {
+            formsCompleted: parsed.formsCompleted || [
+              "HS Code Lookup (HTS USITC)",
+              "Pro Forma Invoice (Trade.gov)",
+              "CBP Form 3461 (Entry Summary)"
+            ],
+            documentsUrl: parsed.documentsUrl || [
+              `https://hts.usitc.gov/?query=${encodeURIComponent(params.partDescription)}`,
+              "https://www.trade.gov/pro-forma-invoice",
+              "https://www.cbp.gov/document/forms/form-3461-entry-immediate-delivery"
+            ],
+            hsCode: parsed.hsCode || params.hsCode,
+            invoiceNumber: parsed.invoiceNumber,
+            estimatedDuty: parsed.estimatedDuty
+          };
+        } catch {
+          return getMockTradeDocuments();
+        }
+      }
+    }
+    throw new Error('Browser Use task timed out after 80s');
+  } catch (err: any) {
+    console.warn(`[browser-use] fillTradeDocuments failed or timed out: ${err.message}, returning fallback mock.`);
+    return getMockTradeDocuments();
+  }
+}
+

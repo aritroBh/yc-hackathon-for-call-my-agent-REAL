@@ -5,6 +5,7 @@ import { FeedbackCreateSchema } from "@/lib/validators";
 import { computeActualSavings } from "@/lib/patternExtraction";
 import { initiatePayment, initiateSpongePayment } from "@/lib/sponsors/sponge";
 import { createPaymentLink, recordSavingsEvent } from "@/lib/sponsors/stripe";
+import { fillTradeDocuments } from "@/lib/sponsors/browseruse";
 import type { FeedbackRow, CallRow } from "@/types/database";
 
 const AwardSupplierSchema = z.object({
@@ -202,7 +203,26 @@ async function handleAward(request: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // 3. Save transactions in rfq_suppliers metadata
+  // 3. Trigger Browser Use Automated Customs/Trade Documentation
+  let tradeDocs = null;
+  if (quotedPrice && quotedPrice > 0) {
+    try {
+      tradeDocs = await fillTradeDocuments({
+        supplierName: supplier.name,
+        supplierCountry: (supplier.metadata?.country as string) || (supplier.metadata?.language === "yoruba" ? "NG" : "GH") || "GH",
+        partDescription: (rfq.items && Array.isArray(rfq.items) && rfq.items.length > 0) ? (rfq.items[0].description || rfq.title) : rfq.title,
+        quantity: (rfq.items && Array.isArray(rfq.items) && rfq.items.length > 0) ? (rfq.items[0].quantity || 1) : 1,
+        unitPrice: quotedPrice / ((rfq.items && Array.isArray(rfq.items) && rfq.items.length > 0) ? (rfq.items[0].quantity || 1) : 1),
+        totalValue: quotedPrice,
+        currency: rfq.currency || "USD",
+        buyerCompanyName: "HAGGL Global Import Corp"
+      });
+    } catch (docErr: any) {
+      console.warn("[Award] Automated trade documentation failed:", docErr.message);
+    }
+  }
+
+  // 4. Save transactions in rfq_suppliers metadata
   const currentMetadata = (rfqSupplier.metadata as Record<string, unknown>) || {};
   const updatedMetadata = {
     ...currentMetadata,
@@ -211,7 +231,8 @@ async function handleAward(request: NextRequest): Promise<NextResponse> {
     sponsor_stripe_payment_link: stripeLink?.url || null,
     sponsor_stripe_payment_link_id: stripeLink?.paymentLinkId || null,
     sponsor_savings_tracked: (rfq.target_price && quotedPrice) ? (rfq.target_price - quotedPrice) : 0,
-    sponsor_payment_timestamp: new Date().toISOString()
+    sponsor_payment_timestamp: new Date().toISOString(),
+    trade_documents: tradeDocs || null
   };
 
   const { error: linkError } = await tables.rfq_suppliers

@@ -46,6 +46,7 @@ export async function GET(
       payment_link_id: metadata.sponsor_stripe_payment_link_id || null,
       savings_tracked: metadata.sponsor_savings_tracked || 0,
       payment_timestamp: metadata.sponsor_payment_timestamp || null,
+      trade_documents: metadata.trade_documents || null,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

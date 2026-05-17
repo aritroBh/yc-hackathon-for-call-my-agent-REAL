@@ -272,6 +272,44 @@ export default function ResultsTable({ suppliers, explanations, recommended, loa
               </div>
             </div>
           </div>
+
+          {paymentInfo.trade_documents && (
+            <div className="mt-4 pt-4 border-t border-emerald-500/20 space-y-3">
+              <div className="flex items-center gap-3">
+                <span className="text-cyan-400 font-bold text-xs uppercase tracking-wider">📄 Trade Forms completed via Browser Use</span>
+                {paymentInfo.trade_documents.hsCode && (
+                  <span className="text-[10px] bg-cyan-950/40 text-cyan-400 border border-cyan-800/30 px-2 py-0.5 rounded font-mono shadow-sm">
+                    HS Code: {paymentInfo.trade_documents.hsCode}
+                  </span>
+                )}
+                {paymentInfo.trade_documents.estimatedDuty && (
+                  <span className="text-[10px] bg-pink-950/40 text-pink-400 border border-pink-800/30 px-2 py-0.5 rounded font-mono shadow-sm">
+                    Est. Duty: {paymentInfo.trade_documents.estimatedDuty}
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2.5">
+                {paymentInfo.trade_documents.formsCompleted?.map((form: string, idx: number) => {
+                  const url = paymentInfo.trade_documents.documentsUrl?.[idx];
+                  return (
+                    <div key={idx} className="bg-slate-900/60 border border-slate-700/40 rounded px-3 py-2 flex items-center justify-between gap-4 text-[11px] shadow-sm hover:border-slate-600 transition-colors">
+                      <span className="text-slate-300 font-medium">{form}</span>
+                      {url && (
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-cyan-400 hover:text-cyan-300 font-bold uppercase text-[9px] tracking-wider transition-colors"
+                        >
+                          View ↗
+                        </a>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

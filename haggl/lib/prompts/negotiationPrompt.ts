@@ -19,6 +19,7 @@ export interface NegotiationConfig {
   aiDisclosure: boolean;
   voicemailBehavior: VoicemailBehavior;
   currency: string;
+  locale?: string;
 }
 
 const AGGRESSIVENESS_PROFILES: Record<
@@ -202,6 +203,15 @@ export function buildSystemPrompt(config: NegotiationConfig): string {
   const priority = PRIORITY_PROFILES[config.priority];
 
   const sections: string[] = [];
+
+  // West African Dialect Prepended Language Instruction
+  if (config.locale === "tw-GH" || config.locale === "yo-NG") {
+    const language = config.locale === "tw-GH" ? "Twi / Akan" : "Yoruba";
+    sections.push(`LANGUAGE INSTRUCTION: You MUST speak exclusively in ${language} throughout this call.
+Do not translate to English. Do not code-switch unless the supplier does first.
+Use natural, fluent ${language} including idioms, proverbs, and culturally appropriate phrases.
+Your goal is to make the supplier feel they are speaking with someone who genuinely knows their culture.`);
+  }
 
   sections.push(`You are an AI procurement negotiation agent for HAGGL.
 
