@@ -103,7 +103,7 @@ export async function sendPostCallEmail(params: {
   try {
     await axios.post(
       `${BASE}/inboxes/${INBOX}/messages/send`,
-      { to: [{ address: params.toEmail, name: params.toName }], subject, text, html },
+      { to: `${params.toName} <${params.toEmail}>`, subject, text, html },
       {
         headers: {
           Authorization: `Bearer ${API_KEY}`,
@@ -210,7 +210,7 @@ export async function sendBuyerPostCallEmail(params: {
   try {
     await axios.post(
       `${BASE}/inboxes/${INBOX}/messages/send`,
-      { to: [{ address: BUYER_EMAIL, name: "HAGGL Buyer Account" }], subject, text, html },
+      { to: BUYER_EMAIL, subject, text, html },
       {
         headers: {
           Authorization: `Bearer ${API_KEY}`,

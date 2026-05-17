@@ -38,11 +38,12 @@ export async function initiateSpongePayment(params: {
   };
 
   if (!API_KEY) {
-    console.log(`[sponge] API key missing, returning completed mock payment for: ${params.recipientName}`);
+    console.log('[sponge] MOCK PAYMENT (no API key): would pay $' + params.amount + ' to ' + params.recipientName);
     return getMockPayment();
   }
 
   try {
+    console.log('[sponge] attempting payment:', JSON.stringify({ url: `${BASE}/payment`, amount: params.amount, recipient: params.recipientName }));
     const { data } = await axios.post(
       `${BASE}/payment`,
       {
@@ -67,6 +68,7 @@ export async function initiateSpongePayment(params: {
       status: data.status || "completed",
     };
   } catch (err: any) {
+    console.warn('[sponge] response error details:', err.response?.status, err.response?.data);
     console.warn("[sponge] initiate payment failed, returning fallback mock:", err.message);
     return getMockPayment();
   }

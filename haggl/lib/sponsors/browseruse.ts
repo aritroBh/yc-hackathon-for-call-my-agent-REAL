@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const BASE_URL = process.env.BROWSER_USE_BASE_URL || "https://api.browser-use.com/api/v1";
+const BASE_URL = process.env.BROWSER_USE_BASE_URL || "https://api.browser-use.com/api/v3";
 const API_KEY = process.env.BROWSER_USE_API_KEY;
 
 export interface ResearchResult {
@@ -50,35 +50,39 @@ export async function researchSupplier(
   const taskPrompt = `Search for ${supplierName} manufacturer. Find: their website, any recent news, typical price range for ${partName}, certifications listed, any negative reviews or red flags. Return JSON.`;
 
   try {
-    const { data } = await axios.post(
-      `${BASE_URL}/run-task`,
-      { 
-        task: taskPrompt,
-        structured_output_json: {
-          type: "object",
-          properties: {
-            website: { type: "string" },
-            recentNews: { type: "array", items: { type: "string" } },
-            estimatedPriceRange: { type: "string" },
-            certifications: { type: "array", items: { type: "string" } },
-            redFlags: { type: "array", items: { type: "string" } }
-          }
-        }
-      },
+    // 1. Create session (start the task)
+    const createRes = await axios.post(
+      `${BASE_URL}/sessions`,
+      { task: taskPrompt },
       {
         headers: {
-          Authorization: `Bearer ${API_KEY}`,
-          "Content-Type": "application/json"
+          'X-Browser-Use-API-Key': API_KEY,
+          'Content-Type': 'application/json'
         },
-        timeout: 15000 // 15s timeout
+        timeout: 10000
       }
-    );
+    )
+    const sessionId = createRes.data.id
+    if (!sessionId) throw new Error('No session ID returned')
 
-    if (data && data.result) {
-      // Parse output if returned as JSON string
-      if (typeof data.result === "string") {
+    // 2. Poll until status is idle/stopped/error (max 15 polls, every 4s)
+    const maxPolls = 15
+    for (let i = 0; i < maxPolls; i++) {
+      await new Promise(r => setTimeout(r, 4000))
+      const pollRes = await axios.get(
+        `${BASE_URL}/sessions/${sessionId}`,
+        {
+          headers: { 'X-Browser-Use-API-Key': API_KEY },
+          timeout: 8000
+        }
+      )
+      const status = pollRes.data.status
+      if (['idle', 'stopped', 'error', 'timed_out'].includes(status)) {
+        const output = pollRes.data.output
+        if (!output || status === 'error') return getMockResearch(supplierName, partName)
+        
         try {
-          const parsed = JSON.parse(data.result);
+          const parsed = typeof output === 'string' ? JSON.parse(output) : output
           return {
             website: parsed.website || parsed.url,
             recentNews: parsed.recentNews || parsed.news || [],
@@ -88,17 +92,17 @@ export async function researchSupplier(
           };
         } catch {
           return {
-            website: data.result.match(/https?:\/\/[^\s]+/)?.[0] || undefined,
-            recentNews: [data.result.substring(0, 200)],
-            estimatedPriceRange: "TBD",
+            website: undefined,
+            recentNews: [output.substring(0, 300)],
+            estimatedPriceRange: 'TBD',
             certifications: [],
             redFlags: []
-          };
+          }
         }
       }
-      return data.result as ResearchResult;
+      // status is 'running' — keep polling
     }
-    return getMockResearch(supplierName, partName);
+    throw new Error('Browser Use task timed out after 60s')
   } catch (err: any) {
     console.warn(`[browser-use] run failed or timed out: ${err.message}, returning fallback research.`);
     return getMockResearch(supplierName, partName);

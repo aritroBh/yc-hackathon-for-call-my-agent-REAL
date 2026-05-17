@@ -216,7 +216,9 @@ async function handleAward(request: NextRequest): Promise<NextResponse> {
 
   const { error: linkError } = await tables.rfq_suppliers
     .update({
-      notes: parsed.notes || "Awarded",
+      notes: spongePayment 
+        ? `Sponge payment ${spongePayment.payment_id}: ${spongePayment.status}. Stripe link: ${stripeLink?.url || 'N/A'}`
+        : (parsed.notes || "Awarded"),
       status: "agreed",
       metadata: updatedMetadata,
       updated_at: new Date().toISOString()

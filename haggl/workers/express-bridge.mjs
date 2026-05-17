@@ -342,6 +342,15 @@ server.listen(PORT, () => {
   console.log(`[bridge] IO: http://localhost:${PORT}`);
   loadDeps()
     .then(() => wireSocketIOEvents())
+    .then(async () => {
+      try {
+        const { initMossIndex } = await import(resolveLib("../lib/sponsors/moss.ts"));
+        await initMossIndex();
+        console.log('[startup] Moss index ready');
+      } catch (err) {
+        console.warn('[startup] Moss index init failed (non-fatal):', err.message);
+      }
+    })
     .catch((err) => console.error("[bridge] Startup dependency load failed:", err));
 });
 

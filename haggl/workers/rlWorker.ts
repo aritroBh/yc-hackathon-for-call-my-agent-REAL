@@ -205,6 +205,19 @@ export class RLWorker {
       if (!this.opts.dryRun) {
         await this.persistPatterns(call.id, patterns);
         const updatedDialect = await this.updateDialectIfApplicable(inferredLocale, dialect, patterns);
+        
+        // Push successful rebuttals to Moss Index
+        try {
+          const { addProcurementFact } = await import("@/lib/sponsors/moss");
+          for (const rebuttal of patterns.successful_rebuttals.slice(0, 3)) {
+            if (rebuttal.effectiveness > 0.7) {
+              await addProcurementFact(rebuttal.text).catch(() => {});
+            }
+          }
+        } catch (err: any) {
+          console.warn("[RLWorker] Failed to push rebuttals to Moss:", err.message);
+        }
+
         await this.awardIfExceptional(call, patterns, rfq?.id || null, quotedPrice, floorPrice);
 
         return {

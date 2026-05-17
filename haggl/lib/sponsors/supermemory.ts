@@ -23,7 +23,10 @@ export async function getSupplierMemory(
   try {
     const { data } = await axios.post(
       `${BASE}/search`,
-      { q: `${supplierName} ${region || ""} negotiation history`.trim() },
+      { 
+        q: `${supplierName} ${region || ""} negotiation history`.trim(),
+        containerTags: ['haggl-negotiations']
+      },
       {
         headers: {
           Authorization: `Bearer ${API_KEY}`,
@@ -32,7 +35,7 @@ export async function getSupplierMemory(
         timeout: 3000,
       }
     );
-    const memories = data.memories || data.results || [];
+    const memories = data.results || data.memories || [];
     if (memories.length === 0) {
       return getMockMemories(supplierName, region);
     }
@@ -59,21 +62,13 @@ export async function storeNegotiationMemory(params: {
     console.log("[supermemory] store skipped (no API key)");
     return;
   }
-  const content = `Supplier ${params.supplierName} in ${params.region}: quoted $${params.quotedPrice || "none"}, lead time ${params.leadTimeDays || "TBD"} days, outcome: ${params.outcome}`;
+  const content = `Supplier ${params.supplierName} in ${params.region}: quoted $${params.quotedPrice || 'none'}/unit, lead time ${params.leadTimeDays || 'TBD'} days, outcome: ${params.outcome}, certifications: ${params.certifications.join(', ') || 'none'}. Call ID: ${params.callId}`;
   try {
     await axios.post(
-      `${BASE}/documents`,
+      `${BASE}/add`,
       { 
         content, 
-        metadata: {
-          supplier_id: params.supplierName,
-          region: params.region,
-          outcome: params.outcome,
-          quoted_price: params.quotedPrice,
-          lead_time_days: params.leadTimeDays,
-          certifications: params.certifications,
-          call_id: params.callId
-        }
+        containerTags: ['haggl-negotiations', `supplier-${params.supplierName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`]
       },
       {
         headers: {
