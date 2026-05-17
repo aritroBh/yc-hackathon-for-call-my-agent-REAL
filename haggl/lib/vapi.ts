@@ -156,13 +156,9 @@ export async function createVapiCall(
   params: VapiOutboundCallParams
 ): Promise<{ vapiCallId: string }> {
   if (!PHONE_NUMBER_ID) {
-    logger.warn(
-      "VAPI_PHONE_NUMBER_ID not set — outbound call dispatch skipped. Import a number in the Vapi dashboard to place real calls.",
-      { callId: params.callId, metadata: { toPhone: params.toPhone } }
+    throw new Error(
+      "VAPI_PHONE_NUMBER_ID is not configured. Go to app.vapi.ai → Phone Numbers → buy or import a number → paste the ID here."
     );
-    // Return a mock id so the worker doesn't crash. The call stays in its
-    // pre-dial state and is reaped by the existing timeout handler.
-    return { vapiCallId: `mock_call_${Date.now()}` };
   }
 
   const body = {

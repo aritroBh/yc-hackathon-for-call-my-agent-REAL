@@ -225,7 +225,7 @@ async function handleAward(request: NextRequest): Promise<NextResponse> {
   const currentMetadata = (rfqSupplier.metadata as Record<string, unknown>) || {};
   const updatedMetadata = {
     ...currentMetadata,
-    sponsor_sponge_payment_id: spongePayment?.payment_id || null,
+    sponsor_sponge_payment_id: spongePayment?.payment_id ?? null,
     sponsor_sponge_status: spongePayment?.status || "failed",
     sponsor_stripe_payment_link: stripeLink?.url || null,
     sponsor_stripe_payment_link_id: stripeLink?.paymentLinkId || null,
@@ -255,7 +255,7 @@ async function handleAward(request: NextRequest): Promise<NextResponse> {
     target_price: rfq.target_price,
     floor_price: floorPrice,
     savings,
-    sponsor_sponge_payment_id: spongePayment?.payment_id || null,
+    sponsor_sponge_payment_id: spongePayment?.payment_id ?? null,
     sponsor_stripe_payment_link: stripeLink?.url || null,
   });
 }

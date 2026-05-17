@@ -17,8 +17,11 @@ export async function sendPostCallEmail(params: {
   rfqId: string;
   compositeScore?: number;
   rank?: number;
-}): Promise<void> {
-  if (!params.toEmail) return;
+}): Promise<{ success: boolean; reason?: string }> {
+  if (!params.toEmail) {
+    console.warn("[agentmail] no recipient email — supplier email skipped");
+    return { success: false, reason: "no_recipient" };
+  }
 
   const subject = `HAGGL: Quote received from ${params.toName} — ${params.outcome.toUpperCase()}`;
   
@@ -96,8 +99,8 @@ export async function sendPostCallEmail(params: {
   const text = `HAGGL: Negotiation completed with ${params.toName}.\nOutcome: ${params.outcome}\nPart: ${params.partName}\nQuoted Price: $${params.quotedPrice || "TBD"}\nLead Time: ${params.leadTimeDays || "TBD"} days\nFull results: ${resultsUrl}`;
 
   if (!API_KEY || !INBOX) {
-    console.log(`[agentmail] MOCK email dispatched to supplier ${params.toEmail}: ${subject}`);
-    return;
+    console.warn("[agentmail] AGENTMAIL_API_KEY or AGENTMAIL_INBOX not set — email skipped");
+    return { success: false, reason: "not_configured" };
   }
 
   try {
@@ -113,8 +116,10 @@ export async function sendPostCallEmail(params: {
       },
     );
     console.log(`[agentmail] email successfully sent to supplier: ${params.toEmail}`);
+    return { success: true };
   } catch (err: any) {
-    console.warn("[agentmail] send to supplier failed:", err.message);
+    console.error("[agentmail] send to supplier failed:", err.message);
+    return { success: false, reason: "send_failed" };
   }
 }
 
@@ -131,7 +136,7 @@ export async function sendBuyerPostCallEmail(params: {
     compositeScore?: number;
     rank?: number;
   }[];
-}): Promise<void> {
+}): Promise<{ success: boolean; reason?: string }> {
   const subject = `HAGGL: Negotiation complete — ${params.rfqTitle}`;
 
   // Sort suppliers by rank or score
@@ -203,8 +208,8 @@ export async function sendBuyerPostCallEmail(params: {
   const text = `HAGGL: Negotiation complete for ${params.rfqTitle}. Ranked table of results at: ${resultsUrl}`;
 
   if (!API_KEY || !INBOX) {
-    console.log(`[agentmail] MOCK email dispatched to buyer ${BUYER_EMAIL}: ${subject}`);
-    return;
+    console.warn("[agentmail] AGENTMAIL_API_KEY or AGENTMAIL_INBOX not set — email skipped");
+    return { success: false, reason: "not_configured" };
   }
 
   try {
@@ -220,8 +225,10 @@ export async function sendBuyerPostCallEmail(params: {
       },
     );
     console.log(`[agentmail] email successfully sent to buyer: ${BUYER_EMAIL}`);
+    return { success: true };
   } catch (err: any) {
-    console.warn("[agentmail] send to buyer failed:", err.message);
+    console.error("[agentmail] send to buyer failed:", err.message);
+    return { success: false, reason: "send_failed" };
   }
 }
 

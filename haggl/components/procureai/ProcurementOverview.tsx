@@ -1,14 +1,27 @@
 "use client";
 
-// Procurement Overview (dashboard) — ported from the Claude Design handoff
-// (yc-hack/project/artboard-overview.jsx). Compact page header, KPI strip,
-// supplier call list. No display serifs.
+// Procurement Overview (dashboard). Driven entirely by real RFQ data from
+// /api/rfqs — no static mock suppliers or hardcoded briefs.
 
 import { useRouter } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Icon } from "./icons";
 import { Popover } from "./Popover";
-import { SUPPLIERS, BRIEF, type Supplier, type CallState } from "./data";
+
+interface RFQ {
+  id: string;
+  title: string;
+  status: string;
+  target_price: number | null;
+  currency: string;
+  deadline: string | null;
+  created_at: string;
+}
+
+interface FeedItem {
+  time: string;
+  text: string;
+}
 
 function TopBar({ crumbs }: { crumbs: string[] }) {
   return (
@@ -58,94 +71,6 @@ function SideRail({ active }: { active: string }) {
   );
 }
 
-function CallRow({
-  supplier,
-  state,
-  onOpen,
-}: {
-  supplier: Supplier;
-  state: CallState;
-  onOpen: () => void;
-}) {
-  const dotColor =
-    state === "live"
-      ? "var(--clay-500)"
-      : state === "ringing"
-        ? "var(--amber-500)"
-        : state === "queued"
-          ? "var(--ink-4)"
-          : "var(--green-500)";
-  const stateLabel =
-    state === "live"
-      ? "On call"
-      : state === "ringing"
-        ? "Ringing"
-        : state === "queued"
-          ? "Queued"
-          : "Completed";
-  return (
-    <tr>
-      <td style={{ width: 24, paddingRight: 0 }}>
-        <div className="pa-flag" style={{ background: supplier.color, width: 24, height: 24, fontSize: 11 }}>
-          {supplier.initial}
-        </div>
-      </td>
-      <td style={{ fontWeight: 500 }}>{supplier.name}</td>
-      <td style={{ color: "var(--ink-3)" }}>
-        {supplier.city}, {supplier.region}
-      </td>
-      <td style={{ color: "var(--ink-3)" }}>{supplier.language}</td>
-      <td>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--ink-2)" }}>
-          <span
-            className={state === "live" ? "pa-pulse" : ""}
-            style={{ width: 7, height: 7, borderRadius: "50%", background: dotColor, display: "inline-block" }}
-          />
-          {stateLabel}
-        </span>
-      </td>
-      <td style={{ minWidth: 140 }}>
-        {state === "live" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div className="pa-wave" style={{ height: 16 }}>
-              {Array.from({ length: 12 }).map((_, i) => (
-                <i key={i} style={{ animationDelay: `${i * 0.06}s`, width: 2 }} />
-              ))}
-            </div>
-            <span className="pa-mono" style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
-              04:18
-            </span>
-          </div>
-        )}
-        {state === "completed" && (
-          <span className="pa-mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>
-            {supplier.callDuration}
-          </span>
-        )}
-        {state === "ringing" && (
-          <span style={{ fontSize: 12, color: "var(--amber-600)" }}>Dialing… attempt 3</span>
-        )}
-      </td>
-      <td className="pa-num" style={{ fontWeight: 500 }}>
-        {state === "completed" || state === "live" ? `$${supplier.priceUsd.toFixed(2)}` : "—"}
-        {(state === "completed" || state === "live") && (
-          <span style={{ color: "var(--ink-3)", fontWeight: 400, fontSize: 11.5 }}> /kg</span>
-        )}
-      </td>
-      <td style={{ textAlign: "right" }}>
-        <button
-          onClick={onOpen}
-          className="pa-btn pa-btn-ghost"
-          style={{ height: 26, padding: "0 8px", fontSize: 11.5, color: "var(--ink-3)" }}
-        >
-          {state === "live" ? "Listen in" : state === "completed" ? "Transcript" : "Details"}{" "}
-          <Icon.ArrowRight size={11} />
-        </button>
-      </td>
-    </tr>
-  );
-}
-
 function Row({ k, v, highlight }: { k: string; v: ReactNode; highlight?: boolean }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", gap: 12 }}>
@@ -157,37 +82,28 @@ function Row({ k, v, highlight }: { k: string; v: ReactNode; highlight?: boolean
   );
 }
 
-function BriefPopover() {
+function BriefPopover({ rfq }: { rfq: RFQ | null }) {
   return (
     <div style={{ padding: 18 }}>
       <div className="pa-eyebrow" style={{ marginBottom: 10 }}>
         Procurement brief
       </div>
       <div style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.6 }}>
-        <Row k="Product" v="Traditional woven kente fabric (48in)" />
-        <Row k="Region" v="West Africa (Ghana / Nigeria)" />
-        <Row k="Quantity" v="5,000 yards" />
-        <Row k="Target price" v="$8.50 / yard" highlight />
-        <Row k="Walk-away" v="$10.00 / yard" />
-        <Row k="Deadline" v={BRIEF.deadline} />
-        <Row k="Negotiation" v="Balanced" />
-      </div>
-      <div style={{ borderTop: "1px solid var(--line-2)", marginTop: 14, paddingTop: 12, fontSize: 11.5, color: "var(--ink-3)" }}>
-        Submitted by Eshan H. · 09:02
+        <Row k="RFQ" v={rfq?.title || "—"} />
+        <Row k="Status" v={rfq?.status || "—"} />
+        <Row
+          k="Target price"
+          v={rfq?.target_price != null ? `${rfq.currency || "USD"} ${rfq.target_price}` : "—"}
+          highlight
+        />
+        <Row k="Deadline" v={rfq?.deadline || "—"} />
+        <Row k="Created" v={rfq ? new Date(rfq.created_at).toLocaleString() : "—"} />
       </div>
     </div>
   );
 }
 
-function ActivityPopover() {
-  const items: { time: string; accent: string | null; text: ReactNode }[] = [
-    { time: "09:42", accent: "var(--clay-500)", text: <>Placed call to <b>Kofi Textiles Ltd</b> in Twi (Accra, Ghana).</> },
-    { time: "09:38", accent: "var(--green-500)", text: <>Live intel fired: Moss flagged kente price anchor $10/yd vs market $8.40/yd.</> },
-    { time: "09:31", accent: null, text: <>Completed call with Adebayo Manufacturing in Yoruba. Deal at $9.50/unit.</> },
-    { time: "09:22", accent: null, text: <>Placed call to Ghana Agro Exports in Akan (Kumasi).</> },
-    { time: "09:18", accent: null, text: <>Browser Use: researched Kofi Textiles — AGOA certified, GSA mark holder.</> },
-    { time: "09:04", accent: null, text: <>Supermemory: prior Kofi deal at $8.40/yd loaded into negotiation context.</> },
-  ];
+function ActivityPopover({ feed }: { feed: FeedItem[] }) {
   return (
     <div style={{ padding: "14px 4px 8px" }}>
       <div style={{ padding: "0 14px 8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -197,29 +113,23 @@ function ActivityPopover() {
         </span>
       </div>
       <div style={{ maxHeight: 320, overflow: "auto" }}>
-        {items.map((it, i) => (
-          <div
-            key={i}
-            style={{ display: "grid", gridTemplateColumns: "44px 14px 1fr", gap: 8, padding: "9px 14px", alignItems: "flex-start" }}
-          >
-            <div className="pa-mono" style={{ fontSize: 10.5, color: "var(--ink-4)", paddingTop: 3 }}>
-              {it.time}
-            </div>
-            <div style={{ paddingTop: 5 }}>
-              <span
-                style={{
-                  display: "inline-block",
-                  width: 7,
-                  height: 7,
-                  borderRadius: "50%",
-                  background: it.accent || "var(--ink-4)",
-                  boxShadow: it.accent ? `0 0 0 3px ${it.accent}22` : "none",
-                }}
-              />
-            </div>
-            <div style={{ fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.5 }}>{it.text}</div>
+        {feed.length === 0 ? (
+          <div style={{ padding: "16px 14px", fontSize: 12.5, color: "var(--ink-4)" }}>
+            No activity yet.
           </div>
-        ))}
+        ) : (
+          feed.map((it, i) => (
+            <div
+              key={i}
+              style={{ display: "grid", gridTemplateColumns: "44px 1fr", gap: 8, padding: "9px 14px", alignItems: "flex-start" }}
+            >
+              <div className="pa-mono" style={{ fontSize: 10.5, color: "var(--ink-4)", paddingTop: 3 }}>
+                {it.time}
+              </div>
+              <div style={{ fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.5 }}>{it.text}</div>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
@@ -230,6 +140,17 @@ export function ProcurementOverview() {
   const [demoLoading, setDemoLoading] = useState(false);
   const [rlLoading, setRlLoading] = useState(false);
   const [rlResult, setRlResult] = useState<string | null>(null);
+  const [rfqs, setRfqs] = useState<RFQ[]>([]);
+  const [feed] = useState<FeedItem[]>([]);
+
+  useEffect(() => {
+    const orgId = process.env.NEXT_PUBLIC_DEMO_ORG_ID;
+    if (!orgId) return;
+    fetch(`/api/rfqs?organization_id=${encodeURIComponent(orgId)}`)
+      .then((r) => r.json())
+      .then((d) => setRfqs(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, []);
 
   const runDemo = async () => {
     setDemoLoading(true);
@@ -255,11 +176,16 @@ export function ProcurementOverview() {
     }
   };
 
-  const openMonitor = () => router.push("/rfq/demo/monitor");
+  const activeRfq = rfqs[0] || null;
+  const negotiatingCount = rfqs.filter((r) => r.status === "negotiating").length;
+  const openMonitor = () => {
+    if (activeRfq) router.push(`/rfq/${activeRfq.id}/monitor`);
+    else router.push("/rfq/new");
+  };
 
   return (
     <div className="pa-screen pa">
-      <TopBar crumbs={["Procurements", "PR-2614 · Raw cotton"]} />
+      <TopBar crumbs={["Procurements", activeRfq?.title || "No RFQ selected"]} />
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         <SideRail active="home" />
 
@@ -268,14 +194,17 @@ export function ProcurementOverview() {
           <div className="pa-page-head">
             <div style={{ flex: 1 }}>
               <div className="pa-page-title">
-                <span>Raw cotton, Grade A</span>
-                <span className="pa-chip clay" style={{ height: 20, fontSize: 10.5 }}>
-                  <span className="pa-pulse" style={{ width: 5, height: 5 }} />
-                  Calling
-                </span>
+                <span>{activeRfq?.title || "No active RFQ"}</span>
+                {activeRfq && (
+                  <span className="pa-chip clay" style={{ height: 20, fontSize: 10.5 }}>
+                    {activeRfq.status}
+                  </span>
+                )}
               </div>
               <div className="pa-page-sub" style={{ marginTop: 4 }}>
-                PR-2614 · West Africa (Ghana / Nigeria) · deadline {BRIEF.deadline}
+                {activeRfq
+                  ? `Deadline ${activeRfq.deadline || "—"}`
+                  : "Create an RFQ to start negotiating"}
               </div>
             </div>
 
@@ -306,23 +235,10 @@ export function ProcurementOverview() {
               trigger={
                 <button className="pa-btn pa-btn-ghost" style={{ height: 30, color: "var(--ink-2)" }}>
                   <Icon.Inbox size={13} /> Activity
-                  <span
-                    style={{
-                      background: "var(--clay-500)",
-                      color: "#fff",
-                      borderRadius: 4,
-                      padding: "1px 5px",
-                      fontSize: 10,
-                      fontWeight: 500,
-                      marginLeft: 2,
-                    }}
-                  >
-                    6
-                  </span>
                 </button>
               }
             >
-              <ActivityPopover />
+              <ActivityPopover feed={feed} />
             </Popover>
 
             <Popover
@@ -333,62 +249,51 @@ export function ProcurementOverview() {
                 </button>
               }
             >
-              <BriefPopover />
+              <BriefPopover rfq={activeRfq} />
             </Popover>
 
-            <button className="pa-btn pa-btn-ghost" style={{ height: 30, color: "var(--ink-2)" }}>
-              <Icon.Plus size={13} /> Supplier
+            <button
+              className="pa-btn pa-btn-ghost"
+              style={{ height: 30, color: "var(--ink-2)" }}
+              onClick={() => router.push("/rfq/new")}
+            >
+              <Icon.Plus size={13} /> New RFQ
             </button>
           </div>
 
           {/* KPI strip */}
           <div style={{ padding: "20px 28px 0", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
             <div className="pa-kpi">
-              <div className="label">Calls dispatched</div>
-              <div className="value">
-                4<span className="suffix">/4</span>
-              </div>
-              <div className="sub">1 live · 2 done · 1 ringing</div>
+              <div className="label">RFQs</div>
+              <div className="value">{rfqs.length}</div>
+              <div className="sub">{negotiatingCount} negotiating</div>
             </div>
             <div className="pa-kpi">
-              <div className="label">Best quote so far</div>
+              <div className="label">Target price</div>
               <div className="value">
-                $1.74<span className="suffix">/kg</span>
+                {activeRfq?.target_price != null ? `${activeRfq.currency || "USD"} ${activeRfq.target_price}` : "—"}
               </div>
-              <div className="sub" style={{ color: "var(--green-600)" }}>
-                −$0.06 vs target
-              </div>
+              <div className="sub">{activeRfq?.title || "—"}</div>
             </div>
             <div className="pa-kpi">
-              <div className="label">Time elapsed</div>
-              <div className="value">
-                28<span className="suffix">min</span>
-              </div>
-              <div className="sub">est. 12 min remaining</div>
+              <div className="label">Deadline</div>
+              <div className="value" style={{ fontSize: 16 }}>{activeRfq?.deadline || "—"}</div>
+              <div className="sub">{activeRfq ? activeRfq.status : "—"}</div>
             </div>
             <div className="pa-kpi">
-              <div className="label">Languages</div>
-              <div className="value">3</div>
-              <div className="sub">TWI · YOR · AKAN</div>
+              <div className="label">Status</div>
+              <div className="value" style={{ fontSize: 16 }}>{activeRfq?.status || "—"}</div>
+              <div className="sub">{activeRfq ? new Date(activeRfq.created_at).toLocaleDateString() : "—"}</div>
             </div>
           </div>
 
-          {/* call list */}
+          {/* RFQ list */}
           <div style={{ padding: "24px 28px", flex: 1, overflow: "auto" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <span style={{ fontSize: 13.5, fontWeight: 500 }}>Suppliers in call</span>
-                <div className="pa-tabs">
-                  <button className="active">All · 4</button>
-                  <button>Live · 1</button>
-                  <button>Done · 2</button>
-                </div>
+                <span style={{ fontSize: 13.5, fontWeight: 500 }}>RFQs · {rfqs.length}</span>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <div className="pa-input-wrap">
-                  <Icon.Search size={12} />
-                  <input className="pa-input" placeholder="Search suppliers" />
-                </div>
                 <button className="pa-btn" onClick={openMonitor}>
                   Open call monitor <Icon.ArrowRight size={11} />
                 </button>
@@ -399,28 +304,51 @@ export function ProcurementOverview() {
               <table className="pa-table">
                 <thead>
                   <tr>
-                    <th style={{ width: 24 }}></th>
-                    <th>Supplier</th>
-                    <th>Location</th>
-                    <th>Language</th>
+                    <th>RFQ</th>
                     <th>Status</th>
-                    <th>Activity</th>
-                    <th>Quote</th>
+                    <th>Target price</th>
+                    <th>Deadline</th>
+                    <th>Created</th>
                     <th style={{ textAlign: "right" }}>Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <CallRow supplier={SUPPLIERS[1]} state="live" onOpen={openMonitor} />
-                  <CallRow supplier={SUPPLIERS[0]} state="completed" onOpen={openMonitor} />
-                  <CallRow supplier={SUPPLIERS[2]} state="completed" onOpen={openMonitor} />
-                  <CallRow supplier={SUPPLIERS[3]} state="ringing" onOpen={openMonitor} />
+                  {rfqs.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: "center", color: "var(--ink-4)", padding: "32px 0", fontSize: 13 }}>
+                        No RFQs yet —{" "}
+                        <button
+                          onClick={() => router.push("/rfq/new")}
+                          style={{ color: "var(--clay-600)", textDecoration: "underline" }}
+                        >
+                          create one with Deep Research
+                        </button>
+                      </td>
+                    </tr>
+                  ) : (
+                    rfqs.map((rfq) => (
+                      <tr key={rfq.id}>
+                        <td style={{ fontWeight: 500 }}>{rfq.title}</td>
+                        <td style={{ color: "var(--ink-3)" }}>{rfq.status}</td>
+                        <td className="pa-num">
+                          {rfq.target_price != null ? `${rfq.currency || "USD"} ${rfq.target_price}` : "—"}
+                        </td>
+                        <td style={{ color: "var(--ink-3)" }}>{rfq.deadline || "—"}</td>
+                        <td style={{ color: "var(--ink-3)" }}>{new Date(rfq.created_at).toLocaleDateString()}</td>
+                        <td style={{ textAlign: "right" }}>
+                          <button
+                            onClick={() => router.push(`/rfq/${rfq.id}/monitor`)}
+                            className="pa-btn pa-btn-ghost"
+                            style={{ height: 26, padding: "0 8px", fontSize: 11.5, color: "var(--ink-3)" }}
+                          >
+                            Monitor <Icon.ArrowRight size={11} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
-            </div>
-
-            <div style={{ marginTop: 16, fontSize: 12, color: "var(--ink-4)", display: "flex", alignItems: "center", gap: 8 }}>
-              <Icon.Sparkle size={12} color="var(--clay-500)" />
-              Agent will surface a deal review once all 4 calls complete.
             </div>
           </div>
         </div>

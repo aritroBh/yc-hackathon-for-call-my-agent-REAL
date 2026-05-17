@@ -15,36 +15,9 @@ export async function researchSupplier(
   supplierName: string,
   partName: string
 ): Promise<ResearchResult | null> {
-  const getMockResearch = (sName: string, pName: string): ResearchResult => {
-    const isSteel = pName.toLowerCase().includes("steel");
-    if (isSteel) {
-      return {
-        website: `https://${sName.toLowerCase().replace(/[^a-z0-9]/g, "") || "supplier"}.com`,
-        recentNews: [
-          `${supplierName} commissions new high-efficiency electric arc furnace in Ohio, increasing production capacity by 25%.`,
-          `${supplierName} announces compliance with net-zero carbon initiatives for structural steel products.`
-        ],
-        estimatedPriceRange: "$800 - $870 per metric ton",
-        certifications: ["ISO-9001", "ISO-14001", "AISC Certified Fabricator"],
-        redFlags: ["Minor port-clearance delays reported in East Coast shipments during Q4."]
-      };
-    } else {
-      return {
-        website: `https://${sName.toLowerCase().replace(/[^a-z0-9]/g, "") || "supplier"}.com`,
-        recentNews: [
-          `${supplierName} receives aerospace tooling certification.`,
-          `${supplierName} highlights high-precision stamping and aluminum molding facilities in new catalog.`
-        ],
-        estimatedPriceRange: "$8.20 - $9.80 per unit",
-        certifications: ["ISO-9001", "AS9100D Aerospace Certified"],
-        redFlags: ["No major negative feedback or red flags identified on safety or delivery compliance."]
-      };
-    }
-  };
-
   if (!API_KEY) {
-    console.log(`[browser-use] Research mock fallback loaded for: ${supplierName}`);
-    return getMockResearch(supplierName, partName);
+    console.warn(`[browser-use] BROWSER_USE_API_KEY not set — supplier research skipped for: ${supplierName}`);
+    return null;
   }
 
   const taskPrompt = `Search for ${supplierName} manufacturer. Find: their website, any recent news, typical price range for ${partName}, certifications listed, any negative reviews or red flags. Return JSON.`;
@@ -79,7 +52,7 @@ export async function researchSupplier(
       const status = pollRes.data.status
       if (['idle', 'stopped', 'error', 'timed_out'].includes(status)) {
         const output = pollRes.data.output
-        if (!output || status === 'error') return getMockResearch(supplierName, partName)
+        if (!output || status === 'error') return null
         
         try {
           const parsed = typeof output === 'string' ? JSON.parse(output) : output
@@ -104,8 +77,8 @@ export async function researchSupplier(
     }
     throw new Error('Browser Use task timed out after 60s')
   } catch (err: any) {
-    console.warn(`[browser-use] run failed or timed out: ${err.message}, returning fallback research.`);
-    return getMockResearch(supplierName, partName);
+    console.error(`[browser-use] researchSupplier failed or timed out: ${err.message}`);
+    return null;
   }
 }
 
@@ -128,30 +101,9 @@ export async function fillTradeDocuments(params: {
   hsCode?: string;
   buyerCompanyName: string;
 }): Promise<TradeDocumentsResult | null> {
-  const getMockTradeDocuments = (): TradeDocumentsResult => {
-    const randomInvoiceNum = "INV-" + Math.floor(100000 + Math.random() * 900000);
-    const mockHsCode = params.hsCode || "6109.10.00";
-    const estDuty = `$${(params.totalValue * 0.045).toFixed(2)}`; // 4.5% import duty estimate
-    return {
-      formsCompleted: [
-        "HS Code Lookup (HTS USITC)",
-        "Pro Forma Invoice (Trade.gov)",
-        "CBP Form 3461 (Entry Summary)"
-      ],
-      documentsUrl: [
-        `https://hts.usitc.gov/?query=${encodeURIComponent(params.partDescription)}`,
-        "https://www.trade.gov/pro-forma-invoice",
-        "https://www.cbp.gov/document/forms/form-3461-entry-immediate-delivery"
-      ],
-      hsCode: mockHsCode,
-      invoiceNumber: randomInvoiceNum,
-      estimatedDuty: estDuty
-    };
-  };
-
   if (!API_KEY) {
-    console.log(`[browser-use] Trade documents mock fallback loaded for supplier: ${params.supplierName}`);
-    return getMockTradeDocuments();
+    console.warn(`[browser-use] BROWSER_USE_API_KEY not set — trade documents skipped for supplier: ${params.supplierName}`);
+    return null;
   }
 
   const taskPrompt = `Complete the following trade documentation for an import from ${params.supplierCountry || "Ghana/Nigeria"}:
@@ -190,7 +142,7 @@ export async function fillTradeDocuments(params: {
       const status = pollRes.data.status;
       if (['idle', 'stopped', 'error', 'timed_out'].includes(status)) {
         const output = pollRes.data.output;
-        if (!output || status === 'error') return getMockTradeDocuments();
+        if (!output || status === 'error') return null;
 
         try {
           const parsed = typeof output === 'string' ? JSON.parse(output) : output;
@@ -210,14 +162,14 @@ export async function fillTradeDocuments(params: {
             estimatedDuty: parsed.estimatedDuty
           };
         } catch {
-          return getMockTradeDocuments();
+          return null;
         }
       }
     }
     throw new Error('Browser Use task timed out after 80s');
   } catch (err: any) {
-    console.warn(`[browser-use] fillTradeDocuments failed or timed out: ${err.message}, returning fallback mock.`);
-    return getMockTradeDocuments();
+    console.error(`[browser-use] fillTradeDocuments failed or timed out: ${err.message}`);
+    return null;
   }
 }
 

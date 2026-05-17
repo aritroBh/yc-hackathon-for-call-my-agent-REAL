@@ -11,14 +11,10 @@ export async function createPaymentLink(
   amount: number, // Quoted price in dollars
   currency: string,
   metadata: Record<string, string>
-): Promise<{ url: string; paymentLinkId: string }> {
+): Promise<{ url: string; paymentLinkId: string } | null> {
   if (!stripe) {
-    console.log(`[stripe] secret key missing, returning high-fidelity mock payment link for: ${metadata.supplier_id}`);
-    const mockId = "pl_mock_" + Math.random().toString(36).substr(2, 9);
-    return {
-      url: `https://checkout.stripe.com/pay/${mockId}`,
-      paymentLinkId: mockId
-    };
+    console.warn('[stripe] STRIPE_SECRET_KEY not set — payment link skipped');
+    return null;
   }
 
   try {
@@ -52,12 +48,8 @@ export async function createPaymentLink(
       paymentLinkId: paymentLink.id
     };
   } catch (err: any) {
-    console.warn("[stripe] create payment link failed, returning fallback mock:", err.message);
-    const mockId = "pl_mock_" + Math.random().toString(36).substr(2, 9);
-    return {
-      url: `https://checkout.stripe.com/pay/${mockId}`,
-      paymentLinkId: mockId
-    };
+    console.error('[stripe] createPaymentLink failed:', err.message);
+    return null;
   }
 }
 
@@ -66,7 +58,7 @@ export async function recordSavingsEvent(
   savingsAmount: number
 ): Promise<void> {
   if (!stripe) {
-    console.log(`[stripe] recorded mock savings event: saved $${savingsAmount.toFixed(2)} on RFQ: ${rfqId}`);
+    console.warn(`[stripe] STRIPE_SECRET_KEY not set — savings event not recorded for RFQ: ${rfqId}`);
     return;
   }
 

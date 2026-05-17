@@ -7,6 +7,13 @@
       "runtimeArgs": ["/c", "set ENABLE_AUTH=false&& npm --prefix haggl run dev"],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "npm --prefix web run dev"],
+      "port": 3100,
+      "autoPort": true
     }
   ]
 }

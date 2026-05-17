@@ -57,7 +57,7 @@ export async function authMiddleware(request: NextRequest): Promise<NextResponse
 }
 
 export const AUTH_CONFIG = {
-  skipAuth: process.env.ENABLE_AUTH === "false" || process.env.DEMO_MODE === "true",
+  skipAuth: process.env.ENABLE_AUTH === "false",
 };
 
 export async function getAuthMiddleware(request: NextRequest): Promise<{ ok: boolean, userId?: string, organizationId?: string }> {

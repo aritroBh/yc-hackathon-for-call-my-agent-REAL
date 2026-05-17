@@ -24,7 +24,7 @@ export async function getSupplierMemory(
   region?: string,
 ): Promise<string> {
   const client = getClient()
-  if (!client) return getMockMemories(supplierName, region)
+  if (!client) { console.warn('[supermemory] no key — skipping supplier memory'); return "" }
 
   try {
     // Search both vendor context and live negotiation history
@@ -44,7 +44,7 @@ export async function getSupplierMemory(
       ...(negotiationRes.results || []),
     ]
 
-    if (all.length === 0) return getMockMemories(supplierName, region)
+    if (all.length === 0) return ""
 
     return all
       .map((m: any) => {
@@ -57,7 +57,7 @@ export async function getSupplierMemory(
       .join('\n')
   } catch (err: any) {
     console.warn('[supermemory] getSupplierMemory failed:', err.message)
-    return getMockMemories(supplierName, region)
+    return ""
   }
 }
 
@@ -148,13 +148,4 @@ export async function storeNegotiationMemory(params: {
   } catch (err: any) {
     console.warn('[supermemory] store failed:', err.message)
   }
-}
-
-function getMockMemories(name: string, reg?: string): string {
-  const r = reg || 'West Africa'
-  return [
-    `[Memory] Supplier ${name} in ${r}: initial ask $10/unit, settled $8.40 after Twi-language negotiation. Accepts Mobile Money.`,
-    `[Memory] ${name} lead times are padded by ~20%. Stated 8 weeks, delivered in 6.`,
-    `[Memory] ${name} holds AGOA certification. Verified via Ghana Standards Authority.`,
-  ].join('\n')
 }

@@ -1,15 +1,11 @@
-const DEFAULT_DEMO_ORG_ID = "00000000-0000-0000-0000-000000000001";
-
 export function getDemoOrganizationId(): string {
-  return process.env.NEXT_PUBLIC_DEMO_ORG_ID || DEFAULT_DEMO_ORG_ID;
+  const id = process.env.NEXT_PUBLIC_DEMO_ORG_ID;
+  if (!id) throw new Error("NEXT_PUBLIC_DEMO_ORG_ID not set");
+  return id;
 }
 
 export function resolveOrganizationId(
   organizationId?: string | null,
 ): string | null {
-  if (organizationId) return organizationId;
-  if (process.env.DEMO_MODE === "true") {
-    return getDemoOrganizationId();
-  }
-  return null;
+  return organizationId || null;
 }

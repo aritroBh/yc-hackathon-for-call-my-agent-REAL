@@ -106,11 +106,10 @@ export async function recordDealInSponge(params: {
   amount: number
   currency: string
   callId: string
-}): Promise<{ payment_id: string; status: string }> {
+}): Promise<{ payment_id: string; status: string } | null> {
   if (!API_KEY) {
-    const mockId = 'sp_deal_' + Math.random().toString(36).slice(2, 11)
-    console.log('[sponge] MOCK deal record for', params.supplierName, '$' + params.amount)
-    return { payment_id: mockId, status: 'recorded' }
+    console.warn('[sponge] SPONGE_API_KEY not set — deal not recorded on-chain')
+    return null
   }
 
   try {
@@ -132,8 +131,8 @@ export async function recordDealInSponge(params: {
     console.log('[sponge] deal recorded on-chain for', params.supplierName)
     return { payment_id: paymentId, status: 'recorded' }
   } catch (err: any) {
-    console.warn('[sponge] deal record failed:', err.message)
-    return { payment_id: 'sp_deal_fallback', status: 'recorded' }
+    console.error('[sponge] deal record failed:', err.message)
+    return null
   }
 }
 
