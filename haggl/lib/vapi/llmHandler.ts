@@ -89,8 +89,11 @@ export async function handleVapiLlm(req: Request, hagglCallIdHint: string): Prom
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (err: any) {
         console.error("[Vapi custom-llm] turn error:", err?.message);
+        // Neutral pause — the TTS voice (Azure Hindi / Khaya Twi) renders this
+        // in the call's own language. A hardcoded phrase would speak the wrong
+        // language to the supplier.
         controller.enqueue(
-          encoder.encode(sseChunk(model, { content: "Mepa wo kyɛw, mente aseɛ. San ka bio." }, null))
+          encoder.encode(sseChunk(model, { content: "..." }, null))
         );
         controller.enqueue(encoder.encode(sseChunk(model, {}, "stop")));
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));

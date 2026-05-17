@@ -279,7 +279,10 @@ export async function* runNegotiationTurn(
   const supplier = call ? await getSupplierById(call.supplier_id) : null;
 
   if (!call || !rfq || !supplier) {
-    throw new Error("Negotiation context not found");
+    console.error("[negotiation] context not found for hagglCallId:", hagglCallId);
+    yield { type: "delta", text: "..." };
+    yield { type: "done", hangup: false };
+    return;
   }
 
   // Persist supplier utterance + push to dashboard
@@ -464,5 +467,34 @@ export async function finalizeCall(hagglCallId: string): Promise<void> {
       rfqId: call.rfq_id,
       status: "completed",
     });
+
+    // Fire-and-forget: run Haiku extraction, which cascades into scoring +
+    // sponsor actions (AgentMail, Sponge). Real calls only reach results via
+    // this path; don't block the Vapi webhook on it.
+    void (async () => {
+      try {
+        const fullCall = await getCallById(hagglCallId);
+        if (!fullCall?.rfq_id) return;
+        const [supplier, rfq] = await Promise.all([
+          getSupplierById(fullCall.supplier_id),
+          getRFQById(fullCall.rfq_id),
+        ]);
+        if (!supplier || !rfq) return;
+        const { extractCallData, buildTranscriptText } = await import(
+          "@/lib/aggregator"
+        );
+        await extractCallData({
+          callId: hagglCallId,
+          supplierId: fullCall.supplier_id,
+          supplierName: supplier.name,
+          transcriptText: buildTranscriptText(
+            (fullCall.transcript as any[]) || []
+          ),
+          rfqContext: rfq.title,
+        });
+      } catch (err: any) {
+        console.error("[finalizeCall] extraction failed:", err?.message);
+      }
+    })();
   }
 }

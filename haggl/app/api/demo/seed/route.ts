@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
         id: uuid(),
         name: "Kofi Textiles Ltd",
         contact_name: "Kofi Mensah",
-        phone: "+233501234567",
+        phone: "+13187506130",
         email: "kofi@kofitextiles.com.gh",
         metadata: {
           language: "twi",
@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
         id: uuid(),
         name: "Rajesh Fabrics Pvt Ltd",
         contact_name: "Rajesh Kumar",
-        phone: "+911234567890",
+        phone: "+19257818082",
         email: "rajesh@rajeshfabrics.in",
         metadata: {
           language: "hindi",
