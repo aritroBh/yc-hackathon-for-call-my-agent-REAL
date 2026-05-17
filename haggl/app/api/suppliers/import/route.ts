@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { processSupplierImport, generateExampleCSV } from "@/lib/csv-import";
+import { resolveOrganizationId } from "@/lib/demo";
 
 const OrgIdSchema = z.string().uuid("Invalid organization_id");
 
 export async function POST(request: NextRequest) {
   try {
-    let organization_id: string | null = new URL(request.url).searchParams.get("organization_id");
+    let organization_id: string | null = resolveOrganizationId(
+      new URL(request.url).searchParams.get("organization_id"),
+    );
     const contentType = request.headers.get("content-type") || "";
     let csvText: string;
 
@@ -23,11 +26,17 @@ export async function POST(request: NextRequest) {
       }
       const blob = file as Blob;
       csvText = await blob.text();
-      if (!organization_id) organization_id = formData.get("organization_id") as string | null;
+      if (!organization_id) {
+        organization_id = resolveOrganizationId(
+          formData.get("organization_id") as string | null,
+        );
+      }
     } else {
       const body = await request.json().catch(() => ({}));
       csvText = body.csv || body.text || "";
-      if (!organization_id) organization_id = body.organization_id || null;
+      if (!organization_id) {
+        organization_id = resolveOrganizationId(body.organization_id || null);
+      }
       if (!csvText) {
         return NextResponse.json(
           { error: "CSV data required. Send as: text/csv body, multipart form (field: file), or JSON { csv: '...' }" },

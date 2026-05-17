@@ -159,6 +159,7 @@ wss.on("connection", async (ws, req) => {
   let streamSid = null;
   let twilioSid = null;
   let deepgramSession = null;
+  let injector = null;
   const sessionStartTime = Date.now();
 
   const send = (obj) => {
@@ -222,8 +223,24 @@ wss.on("connection", async (ws, req) => {
           if (sessionId) sm.routeDeepgramAudio(sessionId, pcm24kBuf);
         });
 
+        const { OpusInjector } = await import(resolveLib("../lib/opusInjector.ts"));
+        injector = new OpusInjector({
+          injectText: (text) => {
+            deepgramSession.sendInstruction(text);
+          },
+          negotiationContext: {
+            partName: rfq.title,
+            quantity: rfq.items?.[0]?.quantity || 0,
+            targetPrice: rfq.target_price || 0,
+            currency: rfq.currency || "USD",
+            priority: "price"
+          }
+        });
+
         deepgramSession.on("transcript_delta", (entry) => {
           send({ event: "text", streamSid, text: JSON.stringify(entry) });
+          if (entry.role === "user") injector.onSupplierText(entry.content);
+          else if (entry.role === "assistant") injector.onAgentText(entry.content);
         });
 
         deepgramSession.on("function_call", async (payload) => {
@@ -241,6 +258,7 @@ wss.on("connection", async (ws, req) => {
               const { terminateCall } = await import(resolveLib("../lib/twilio.ts"));
               await terminateCall(twilioSid);
             }
+            if (injector) injector.stop();
             if (deepgramSession) deepgramSession.disconnect();
             try { ws.close(1000, "Complete"); } catch {}
           }
@@ -249,6 +267,7 @@ wss.on("connection", async (ws, req) => {
         deepgramSession.on("error", (err) => console.error(`[bridge] DG error:`, err));
 
         deepgramSession.connect();
+        injector.start();
 
         sm.createSession({
           callId,
@@ -277,6 +296,7 @@ wss.on("connection", async (ws, req) => {
         }
       } else if (msg.event === "stop") {
         console.log(`[bridge] Stream stopped: ${streamSid}`);
+        if (injector) { injector.stop(); injector = null; }
         if (deepgramSession) { deepgramSession.disconnect(); deepgramSession = null; }
         if (sessionId) sm.destroySession(sessionId, "stream_stopped");
       }
@@ -286,6 +306,7 @@ wss.on("connection", async (ws, req) => {
   });
 
   ws.on("close", () => {
+    if (injector) { injector.stop(); injector = null; }
     if (deepgramSession) { deepgramSession.disconnect(); deepgramSession = null; }
     if (sessionId) sm.destroySession(sessionId, "ws_close");
   });
@@ -295,6 +316,7 @@ wss.on("connection", async (ws, req) => {
   setTimeout(() => {
     if (ws.readyState === ws.OPEN) {
       console.log(`[bridge] Hard cap: ${sessionId}`);
+      if (injector) injector.stop();
       if (deepgramSession) deepgramSession.disconnect();
       send({ event: "hard_cap", message: "Call duration limit reached" });
       try { ws.close(1000, "Hard cap"); } catch {}

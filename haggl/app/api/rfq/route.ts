@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { tables } from "@/lib/db";
+import { resolveOrganizationId } from "@/lib/demo";
 import { RFQCreateSchema, RFQUpdateSchema } from "@/lib/validators";
 import type { RFQRow } from "@/types/database";
 
@@ -17,7 +18,10 @@ const ListQuerySchema = z.object({
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const parsed = ListQuerySchema.safeParse(Object.fromEntries(searchParams));
+    const parsed = ListQuerySchema.safeParse({
+      ...Object.fromEntries(searchParams),
+      organization_id: resolveOrganizationId(searchParams.get("organization_id")),
+    });
 
     if (!parsed.success) {
       return NextResponse.json(
@@ -69,7 +73,10 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const parsed = RFQCreateSchema.parse(body);
+    const parsed = RFQCreateSchema.parse({
+      ...body,
+      organization_id: resolveOrganizationId(body.organization_id),
+    });
 
     const { data, error } = await tables.rfqs
       .insert(parsed)

@@ -29,7 +29,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   // Build the WebSocket URL for the Express bridge
-  const baseUrl = process.env.TWILIO_WEBHOOK_BASE_URL || "http://localhost:3001";
+  const baseUrl =
+    process.env.SERVER_WEBHOOK_BASE ||
+    process.env.TWILIO_WEBHOOK_BASE_URL ||
+    process.env.TWILIO_WEBHOOK_BASE ||
+    "http://localhost:3001";
   const wsBaseUrl = baseUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
   const streamUrl = `${wsBaseUrl}/media-stream`;
 

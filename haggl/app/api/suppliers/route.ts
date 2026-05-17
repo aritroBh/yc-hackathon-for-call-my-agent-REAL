@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { tables } from "@/lib/db";
+import { resolveOrganizationId } from "@/lib/demo";
 import { SupplierCreateSchema, SupplierUpdateSchema } from "@/lib/validators";
 import { processSupplierImport } from "@/lib/csv-import";
 import type { SupplierRow } from "@/types/database";
@@ -16,7 +17,10 @@ const ListQuerySchema = z.object({
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const parsed = ListQuerySchema.safeParse(Object.fromEntries(searchParams));
+    const parsed = ListQuerySchema.safeParse({
+      ...Object.fromEntries(searchParams),
+      organization_id: resolveOrganizationId(searchParams.get("organization_id")),
+    });
 
     if (!parsed.success) {
       return NextResponse.json(
@@ -87,7 +91,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      const organizationId = searchParams.get("organization_id");
+      const organizationId = resolveOrganizationId(searchParams.get("organization_id"));
       if (!organizationId) {
         return NextResponse.json(
           { error: "organization_id query parameter is required for CSV import" },
@@ -103,7 +107,10 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const parsed = SupplierCreateSchema.parse(body);
+    const parsed = SupplierCreateSchema.parse({
+      ...body,
+      organization_id: resolveOrganizationId(body.organization_id),
+    });
 
     const { data, error } = await tables.suppliers
       .insert(parsed)

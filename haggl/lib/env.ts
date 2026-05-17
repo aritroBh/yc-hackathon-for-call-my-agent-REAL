@@ -14,7 +14,9 @@ const envSchema = z.object({
   TWILIO_ACCOUNT_SID: z.string().min(1),
   TWILIO_AUTH_TOKEN: z.string().min(1),
   TWILIO_PHONE_NUMBER: z.string().min(1),
-  TWILIO_WEBHOOK_BASE: z.string().url(),
+  TWILIO_WEBHOOK_BASE: z.string().url().optional(),
+  TWILIO_WEBHOOK_BASE_URL: z.string().url().optional(),
+  SERVER_WEBHOOK_BASE: z.string().url().optional(),
 
   DEEPGRAM_API_KEY: z.string().min(1),
 
@@ -31,12 +33,21 @@ const envSchema = z.object({
 
   DEMO_MODE: booleanFromString.default("false"),
   ENABLE_AUTH: booleanFromString.default("true"),
+  NEXT_PUBLIC_DEMO_ORG_ID: z.string().uuid().optional(),
   MAX_CONCURRENT_CALLS: z.coerce.number().default(8),
   CALLS_PER_SECOND: z.coerce.number().default(1),
   CALL_TIMEOUT_SECONDS: z.coerce.number().default(480),
 
   NEXT_PUBLIC_SENTRY_DSN: z.string().url().optional(),
   NEXT_PUBLIC_WS_URL: z.string().default("http://localhost:3001"),
+}).superRefine((env, ctx) => {
+  if (!env.TWILIO_WEBHOOK_BASE && !env.TWILIO_WEBHOOK_BASE_URL) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["TWILIO_WEBHOOK_BASE"],
+      message: "TWILIO_WEBHOOK_BASE or TWILIO_WEBHOOK_BASE_URL is required",
+    });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -86,6 +97,7 @@ export const requiredVars: { key: keyof Env; description: string }[] = [
   { key: "TWILIO_AUTH_TOKEN", description: "Twilio auth token" },
   { key: "TWILIO_PHONE_NUMBER", description: "Twilio outbound phone number" },
   { key: "TWILIO_WEBHOOK_BASE", description: "Public base URL for Twilio webhooks (ngrok/production)" },
+  { key: "SERVER_WEBHOOK_BASE", description: "Public base URL for bridge media WebSocket (optional if same host)" },
   { key: "DEEPGRAM_API_KEY", description: "Deepgram API key" },
   { key: "ANTHROPIC_API_KEY", description: "Anthropic API key (Claude)" },
   { key: "ENCRYPTION_KEY", description: "64-char hex AES-256-GCM encryption key" },

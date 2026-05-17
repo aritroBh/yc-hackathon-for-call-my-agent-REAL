@@ -325,6 +325,16 @@ export class DeepgramSession extends EventEmitter {
     this.sendJson({ type: "UserText", text });
   }
 
+  // ── Send instructions ───────────────────────────────
+
+  sendInstruction(content: string): void {
+    if (this.isReady) {
+      this.sendJson({ type: "UpdateInstructions", content });
+    } else {
+      logger.warn("Skipped sendInstruction: session not ready", { callId: this.callId || undefined });
+    }
+  }
+
   // ── Disconnect ─────────────────────────────────────
 
   disconnect(): void {

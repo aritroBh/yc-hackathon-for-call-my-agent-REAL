@@ -1,0 +1,188 @@
+{
+  "issues": [
+    {
+      "severity": "error",
+      "category": "missing_env_vars",
+      "file": "lib/env.ts",
+      "line": 17,
+      "description": "Env schema validates `TWILIO_WEBHOOK_BASE` but .env.example and app/api/calls/stream/route.ts use `TWILIO_WEBHOOK_BASE_URL`. If only TWILIO_WEBHOOK_BASE_URL is set, env.ts validation fails (missing TWILIO_WEBHOOK_BASE). Conversely if TWILIO_WEBHOOK_BASE is set, the route reads process.env.TWILIO_WEBHOOK_BASE_URL which is undefined, falling back to localhost.",
+      "fix": "Rename to `TWILIO_WEBHOOK_BASE_URL` in env.ts schema (line 17) and requiredVars (line 88). Or rename .env.example and route.ts to match. Ensure single source of truth."
+    },
+    {
+      "severity": "error",
+      "category": "api_route_issues",
+      "file": "app/rfq/[id]/monitor/page.tsx",
+      "line": 111,
+      "description": "handleCancel sends DELETE request with body `{ rfq_id: id }`, but the DELETE handler (app/api/dispatch/route.ts:107) reads rfq_id from searchParams (URL query), not request body. Cancellation always fails with 400 because rfqId is null.",
+      "fix": "Change monitor page fetch to `DELETE /api/dispatch?rfq_id=${id}` (query param). Or change DELETE handler to read from body instead."
+    },
+    {
+      "severity": "error",
+      "category": "api_route_issues",
+      "file": "app/rfq/[id]/monitor/page.tsx",
+      "line": 97,
+      "description": "Dispatch POST sends only `{ rfq_id: id }` but app/api/dispatch/route.ts:9 requires `organization_id: z.string().uuid()`. Request will fail Zod validation with 400 error.",
+      "fix": "Include organization_id in dispatch body. Should be derived from auth context or env config, not hardcoded."
+    },
+    {
+      "severity": "error",
+      "category": "api_route_issues",
+      "file": "components/SupplierImport.tsx",
+      "line": 111,
+      "description": "Hardcodes `organization_id: \"seed-org\"` which is not a valid UUID. The import API route (app/api/suppliers/import/route.ts:6) validates organization_id as `z.string().uuid()`. Import always fails UUID validation.",
+      "fix": "Replace hardcoded 'seed-org' with actual organization_id from auth context or user session."
+    },
+    {
+      "severity": "error",
+      "category": "missing_env_vars",
+      "file": "workers/express-bridge.mjs",
+      "line": 20,
+      "description": "Dynamic imports of `.ts` files (`../lib/sessionManager.ts`, `../lib/deepgram.ts`, etc.) from a `.mjs` file will fail at runtime unless Node.js is preloaded with tsx/ts-node. No --loader or --import flag configured in package.json start scripts.",
+      "fix": "Either: (a) compile TS files to JS and import the .js output, (b) start bridge with `node --import tsx workers/express-bridge.mjs`, or (c) convert bridge to TypeScript."
+    },
+    {
+      "severity": "error",
+      "category": "missing_env_vars",
+      "file": ".env.example",
+      "line": 13,
+      "description": "SERVER_PORT used in .env.example and read by express-bridge.mjs (line 7), but env.ts validates `WS_PORT` (line 8) instead. Two different env var names for the same port. If only SERVER_PORT is set, env.ts WS_PORT defaults to 3001 (works accidentally). If only WS_PORT is set, bridge reads undefined SERVER_PORT and defaults to 3001.",
+      "fix": "Unify to a single name. Either use `WS_PORT` everywhere (and update .env.example + bridge), or use `SERVER_PORT` everywhere (and update env.ts)."
+    },
+    {
+      "severity": "error",
+      "category": "missing_env_vars",
+      "file": ".env.example",
+      "line": 26,
+      "description": ".env.example uses `NEXT_PUBLIC_SOCKET_URL` but env.ts line 39 validates `NEXT_PUBLIC_WS_URL`. Client code may read different env var names depending on which import is used.",
+      "fix": "Unify env var name. NEXT_PUBLIC_SOCKET_URL and NEXT_PUBLIC_WS_URL should be the same. Prefer NEXT_PUBLIC_WS_URL (matching env.ts) or add both."
+    },
+    {
+      "severity": "warning",
+      "category": "missing_env_vars",
+      "file": "workers/express-bridge.mjs",
+      "line": 194,
+      "description": "Uses `process.env.HAGGL_AGGRESSIVENESS` and `process.env.HAGGL_PRIORITY` env vars that are not in env.ts schema nor .env.example. These default to 'medium'/'balanced' if unset, but admins have no discoverable way to configure them.",
+      "fix": "Add HAGGL_AGGRESSIVENESS and HAGGL_PRIORITY to env.ts schema (with defaults) and .env.example."
+    },
+    {
+      "severity": "warning",
+      "category": "missing_env_vars",
+      "file": ".env.example",
+      "line": 19,
+      "description": "GEMINI_API_KEY listed in .env.example but not validated in lib/env.ts schema. Possibly unused or legacy — if unused, remove from .env.example to avoid confusion.",
+      "fix": "Either add GEMINI_API_KEY to env.ts schema or remove from .env.example."
+    },
+    {
+      "severity": "warning",
+      "category": "missing_env_vars",
+      "file": "workers/express-bridge.mjs",
+      "line": 292,
+      "description": "Hardcoded 480 second call timeout (8 min). env.ts line 36 defines `CALL_TIMEOUT_SECONDS` (default 480) but this is never read by the bridge. The timeout is duplicated in negotiationPrompt.ts line 288 as well.",
+      "fix": "Import CALL_TIMEOUT_SECONDS from env.ts or read process.env.CALL_TIMEOUT_SECONDS in the bridge instead of hardcoding 480_000."
+    },
+    {
+      "severity": "warning",
+      "category": "api_route_issues",
+      "file": "app/api/calls/stream/route.ts",
+      "line": 98,
+      "description": "POST handler catches all errors and returns `{ ok: true }` with 200 status, silently swallowing Twilio status callback failures. Makes debugging webhook issues impossible.",
+      "fix": "Log the error server-side and return appropriate error status (e.g. 500 with error details). At minimum log the error before returning ok:true."
+    },
+    {
+      "severity": "warning",
+      "category": "race_conditions",
+      "file": "lib/deepgram.ts",
+      "line": null,
+      "description": "Pending audio frame buffer can grow unbounded during sustained network disconnect. No maximum size or TTL on pendingFrames. On reconnect, all buffered frames are sent at once, potentially overwhelming the stream.",
+      "fix": "Add a maximum pending frame count (e.g. 500 frames) and/or a TTL. Drop oldest frames when buffer exceeds limit."
+    },
+    {
+      "severity": "warning",
+      "category": "nextjs_runtime",
+      "file": "app/dashboard/page.tsx",
+      "line": 1,
+      "description": "Dashboard and Calls pages use light theme (bg-white, text-gray-900, border-gray-200) while all other pages use dark theme (bg-slate-800, text-slate-100). Inconsistent user experience. If HAGGL intends dark-only, dashboard and calls need dark variant styling.",
+      "fix": "Align dashboard and calls page styling with the rest of the app (dark theme), or use CSS variables for theme switching."
+    },
+    {
+      "severity": "warning",
+      "category": "race_conditions",
+      "file": "lib/socket.ts",
+      "line": null,
+      "description": "Socket.io client singleton may reconnect and re-register event listeners without cleaning up stale ones from previous connection. Components use socket.on()/socket.off() in useEffect, but a reconnect between mount and unmount could create duplicate handlers.",
+      "fix": "Use socket.io's `offAny()` or namespace-based scoping. Or have components check a connection generation counter before processing events."
+    },
+    {
+      "severity": "warning",
+      "category": "api_route_issues",
+      "file": "app/api/dispatch/route.ts",
+      "line": 9,
+      "description": "Dispatch POST schema always requires `organization_id: uuid`, but when called from the monitor page, no auth context provides it. This forces all callers to hardcode or fake an org_id, making multi-tenant support impossible.",
+      "fix": "Make organization_id optional and derive from authenticated user's session via middleware/auth context."
+    },
+    {
+      "severity": "warning",
+      "category": "type_errors",
+      "file": "app/dashboard/page.tsx",
+      "line": 36,
+      "description": "Dashboard filters calls by created_at starting with today's ISO date string, but NegotiationCall.created_at may be undefined (type shows optional). Could produce NaN in date comparison.",
+      "fix": "Add null/undefined guard before .startsWith() check."
+    },
+    {
+      "severity": "warning",
+      "category": "schema_mismatch",
+      "file": "types/database.ts",
+      "line": null,
+      "description": "Types should be verified against db/schema.sql for completeness. Notably dialect_configs table exists in schema but may not have corresponding TypeScript type exports in database.ts.",
+      "fix": "Verify all schema tables have corresponding TypeScript types. Generate types from schema if possible."
+    },
+    {
+      "severity": "warning",
+      "category": "deepgram_reconnect",
+      "file": "lib/deepgram.ts",
+      "line": null,
+      "description": "Deepgram reconnect logic attempts reconnection but may leave stale event listeners attached from previous connection attempts. Each reconnect creates new `on()` handlers without removing old ones, potentially causing duplicate processing on reconnect.",
+      "fix": "Clean up all event listeners before reconnecting. Use `removeAllListeners()` or track listener references for cleanup."
+    },
+    {
+      "severity": "warning",
+      "category": "twilio_stream",
+      "file": "app/api/calls/stream/route.ts",
+      "line": 25,
+      "description": "callId from query param is not validated (no UUID check, no length check). If an attacker sends a crafted callId, it gets forwarded to the TwiML response and passed to Twilio's Media Streams, potentially enabling injection.",
+      "fix": "Validate callId as UUID (or at minimum sanitize string length/characters) before generating TwiML."
+    },
+    {
+      "severity": "warning",
+      "category": "twilio_stream",
+      "file": "workers/express-bridge.mjs",
+      "line": 41,
+      "description": "Socket.io CORS set to origin \"*\" — wide open. Acceptable for development but should be locked to the app's domain in production.",
+      "fix": "Set CORS origin to the actual app URL from env config, or restrict to known origins in production."
+    }
+  ],
+  "summary": {
+    "total_issues": 20,
+    "errors": 6,
+    "warnings": 14,
+    "categories": {
+      "missing_env_vars": 7,
+      "api_route_issues": 5,
+      "race_conditions": 2,
+      "nextjs_runtime": 1,
+      "type_errors": 1,
+      "schema_mismatch": 1,
+      "deepgram_reconnect": 1,
+      "twilio_stream": 2
+    },
+    "top_critical": [
+      "TWILIO_WEBHOOK_BASE vs TWILIO_WEBHOOK_BASE_URL env var mismatch will crash route or validation at startup",
+      "Monitor page cancel uses body-based payload but DELETE handler reads query params — cancel always fails silently",
+      "Dispatch POST from monitor missing required organization_id — dispatch always fails with 400",
+      "SupplierImport hardcodes non-UUID organization_id — CSV import always fails UUID validation",
+      "express-bridge.mjs dynamically imports .ts files from .mjs runtime — crashes on missing tsx preload"
+    ],
+    "health_score": 5.5,
+    "recommendation": "Fix the 5 critical errors first (all error-severity items). The env var name unification is the most impactful — it affects startup validation, Twilio webhook routing, and the bridge port config. Then address the monitor page dispatch/cancel API contract mismatches which make the core RFQ workflow non-functional."
+  }
+}

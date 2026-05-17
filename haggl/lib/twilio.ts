@@ -4,8 +4,8 @@
  * Flow:
  *   1. createOutboundCall() → Twilio REST API → call initiated
  *   2. Twilio calls our statusCallback URL with state updates
- *   3. Twilio requests /outbound-twiml → gets <Connect><Stream> TwiML
- *   4. Twilio opens WebSocket to /api/calls/stream for audio
+ *   3. createOutboundCall() returns inline <Connect><Stream> TwiML
+ *   4. Twilio opens WebSocket to /media-stream for audio
  *   5. terminateCall() → Twilio REST API → call ended
  */
 
@@ -89,24 +89,31 @@ export async function createOutboundCall(
 ): Promise<OutboundCallResult> {
   const client = getClient();
   const from = options?.from || process.env.TWILIO_PHONE_NUMBER;
-  const baseUrl =
+  const statusCallbackBase =
     process.env.TWILIO_WEBHOOK_BASE ||
     process.env.TWILIO_WEBHOOK_BASE_URL ||
     process.env.NEXT_PUBLIC_APP_URL ||
     "http://localhost:3000";
+  const serverBase =
+    process.env.SERVER_WEBHOOK_BASE ||
+    process.env.TWILIO_WEBHOOK_BASE_URL ||
+    "http://localhost:3001";
 
   if (!from) {
     return { success: false, callSid: null, error: "TWILIO_PHONE_NUMBER not configured" };
   }
 
   const statusCallback =
-    options?.statusCallbackUrl || `${baseUrl}/api/calls/status`;
+    options?.statusCallbackUrl || `${statusCallbackBase}/api/calls/stream`;
   const timeout = options?.timeoutSeconds ?? 30;
 
-  const streamUrl = baseUrl.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
-  const twiml = generateDisclosureTwiML(`${streamUrl}/api/calls/stream`, callId);
+  const wsServerUrl = serverBase.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
+  const twiml = generateDisclosureTwiML(`${wsServerUrl}/media-stream`, callId);
 
-  const log = logger.child({ callId, metadata: { to, from, baseUrl } });
+  const log = logger.child({
+    callId,
+    metadata: { to, from, statusCallbackBase, serverBase },
+  });
 
   try {
     const call = await withRetry(

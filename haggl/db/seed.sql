@@ -3,6 +3,13 @@
 -- ──────────────────────────────────────────────────────
 
 BEGIN;
+INSERT INTO organizations (id, name, api_key) VALUES
+('00000000-0000-0000-0000-000000000001', 'HAGGL Demo Organization', 'demo')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO users (id, organization_id, email, name, role, is_active) VALUES
+('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000001', 'demo@haggl.ai', 'Demo User', 'admin', true)
+ON CONFLICT (id) DO NOTHING;
 
 -- ── Dialect Configs ─────────────────────────────────
 

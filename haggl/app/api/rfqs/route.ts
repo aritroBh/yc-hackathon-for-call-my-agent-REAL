@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { tables } from "@/lib/db";
+import { resolveOrganizationId } from "@/lib/demo";
 import { RFQCreateSchema } from "@/lib/validators";
 import type { RFQRow } from "@/types/database";
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const organizationId = searchParams.get("organization_id");
+    const organizationId = resolveOrganizationId(searchParams.get("organization_id"));
     if (!organizationId) {
       return NextResponse.json({ error: "organization_id is required" }, { status: 400 });
     }
@@ -25,7 +26,10 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const parsed = RFQCreateSchema.parse(body);
+    const parsed = RFQCreateSchema.parse({
+      ...body,
+      organization_id: resolveOrganizationId(body.organization_id),
+    });
     const { data, error } = await tables.rfqs.insert(parsed).select().single();
     if (error) throw error;
     return NextResponse.json(data as RFQRow, { status: 201 });
