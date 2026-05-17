@@ -11,6 +11,7 @@ import {
   type SupplierContext,
   type RfqContext,
 } from "@/lib/reasoningQueue";
+import { getMossMarketContext } from "@/lib/sponsors/moss";
 
 const ANTHROPIC_API_KEY = (() => {
   const k = process.env.ANTHROPIC_API_KEY || process.env.OPUS_API_KEY;
@@ -150,32 +151,40 @@ export class OpusInjector {
     sessionId: string,
     trigger: DetectedTrigger,
   ): void {
-    const state = this.sessionManager.getSession(sessionId);
-    if (!state) return;
+    void (async () => {
+      const state = this.sessionManager.getSession(sessionId);
+      if (!state) return;
 
-    const taskId = nextTaskId();
-    this.taskToSession.set(taskId, sessionId);
+      const taskId = nextTaskId();
+      this.taskToSession.set(taskId, sessionId);
 
-    const supplier: SupplierContext = {
-      name: state.supplierName,
-      region: (state as any).supplierRegion || "unknown",
-    };
-    const rfq: RfqContext = {
-      id: state.rfqId,
-      items: [],
-      targetBudget: undefined,
-    };
+      const supplier: SupplierContext = {
+        name: state.supplierName,
+        region: (state as any).supplierRegion || "unknown",
+      };
+      const rfq: RfqContext = {
+        id: state.rfqId,
+        items: [],
+        targetBudget: undefined,
+      };
 
-    this.queue.enqueue({
-      id: taskId,
-      sessionId,
-      triggerId: `${trigger.category}-${trigger.timestamp}`,
-      category: trigger.category,
-      claim: trigger.claim,
-      supplierContext: supplier,
-      rfqContext: rfq,
-      createdAt: Date.now(),
-    });
+      const triggerText = trigger.claim;
+      const mossContext = await getMossMarketContext(triggerText).catch(() => "");
+      const claim = mossContext
+        ? `${triggerText}\nVerified market data (Moss):\n${mossContext}`
+        : triggerText;
+
+      this.queue.enqueue({
+        id: taskId,
+        sessionId,
+        triggerId: `${trigger.category}-${trigger.timestamp}`,
+        category: trigger.category,
+        claim,
+        supplierContext: supplier,
+        rfqContext: rfq,
+        createdAt: Date.now(),
+      });
+    })();
   }
 
   private onReasoningResult(result: ReasoningResult): void {

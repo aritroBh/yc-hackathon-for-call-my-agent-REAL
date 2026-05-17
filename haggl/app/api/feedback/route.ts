@@ -3,6 +3,7 @@ import { z } from "zod";
 import { tables, getRFQById, getSupplierById, getDecryptedFloorPrice, listCallsByRFQ } from "@/lib/db";
 import { FeedbackCreateSchema } from "@/lib/validators";
 import { computeActualSavings } from "@/lib/patternExtraction";
+import { initiatePayment } from "@/lib/sponsors/sponge";
 import type { FeedbackRow, CallRow } from "@/types/database";
 
 const AwardSupplierSchema = z.object({
@@ -164,6 +165,16 @@ async function handleAward(request: NextRequest): Promise<NextResponse> {
     .update({ notes: parsed.notes || "Awarded", status: "agreed", updated_at: new Date().toISOString() })
     .eq("id", rfqSupplier.id);
   if (linkError) throw linkError;
+
+  if (process.env.SPONGE_API_KEY) {
+    void initiatePayment({
+      rfqId: rfq.id,
+      supplierId: parsed.supplier_id,
+      amount: quotedPrice || 0,
+      currency: rfq.currency || "USD",
+      description: "Award: " + (rfq.title || "RFQ"),
+    }).catch(() => {});
+  }
 
   return NextResponse.json({
     success: true,

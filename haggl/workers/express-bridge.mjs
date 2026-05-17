@@ -45,7 +45,7 @@ async function loadDeps() {
 }
 
 function getSM() {
-  return _sessionManager.getSessionManager();
+  return _sessionManager ? _sessionManager.getSessionManager() : null;
 }
 
 // ── Express + WS + Socket.io ─────────────────────────
@@ -308,7 +308,9 @@ server.listen(PORT, () => {
   console.log(`[bridge] HAGGL bridge listening on :${PORT}`);
   console.log(`[bridge] WS: ws://localhost:${PORT}/media-stream`);
   console.log(`[bridge] IO: http://localhost:${PORT}`);
-  setTimeout(() => wireSocketIOEvents(), 100);
+  loadDeps()
+    .then(() => wireSocketIOEvents())
+    .catch((err) => console.error("[bridge] Startup dependency load failed:", err));
 });
 
 process.on("SIGTERM", () => { server.close(() => process.exit(0)); });
