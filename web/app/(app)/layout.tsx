@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { Sidebar } from "@/components/shared/sidebar";
-import { ChatDock } from "@/components/chat/chat-dock";
+import { ChatDockGate } from "@/components/chat/chat-dock-gate";
 
 export default async function AppLayout({
   children,
@@ -17,7 +17,7 @@ export default async function AppLayout({
       <main id="main" className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {children}
       </main>
-      <ChatDock />
+      <ChatDockGate />
     </div>
   );
 }

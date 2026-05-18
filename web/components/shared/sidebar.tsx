@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { RadioTower, MessagesSquare, History, Settings, LogOut } from "lucide-react";
+import { RadioTower, History, Settings, LogOut } from "lucide-react";
 import { useAtlas } from "@/lib/store";
 import { selectKpis } from "@/lib/store/selectors";
 import { signOut } from "@/lib/auth/mock-auth";
@@ -10,7 +10,6 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/dashboard", label: "Active Negotiations", icon: RadioTower, badge: true },
-  { href: "/chat", label: "Chat", icon: MessagesSquare, badge: false },
   { href: "/history", label: "History", icon: History, badge: false },
   { href: "/settings", label: "Settings", icon: Settings, badge: false },
 ];
