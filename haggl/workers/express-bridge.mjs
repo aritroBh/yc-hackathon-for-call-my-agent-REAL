@@ -261,6 +261,43 @@ function getBridgeWsUrl() {
   return base.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
 }
 
+// POST /call/start — dashboard button fires this to initiate a real Twilio call
+app.post("/call/start", async (req, res) => {
+  const to = req.body?.to || process.env.TEST_PHONE || "+19259676242";
+  const lang = req.body?.lang || "bn";
+  const hcid = `twilio_${Date.now()}`;
+
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const from = process.env.TWILIO_PHONE_NUMBER;
+  const webhookBase = process.env.TWILIO_WEBHOOK_BASE;
+
+  if (!accountSid || !authToken || !from || !webhookBase) {
+    return res.status(500).json({ error: "Twilio env vars not set" });
+  }
+
+  const twimlUrl = `${webhookBase}/call/twiml?hcid=${encodeURIComponent(hcid)}&lang=${encodeURIComponent(lang)}`;
+  const statusUrl = `${webhookBase}/call-status`;
+
+  try {
+    const body = new URLSearchParams({ To: to, From: from, Url: twimlUrl, StatusCallback: statusUrl });
+    const resp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`, {
+      method: "POST",
+      headers: {
+        Authorization: "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64"),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+    const data = await resp.json();
+    console.log(`[call/start] hcid=${hcid} sid=${data.sid} to=${to}`);
+    res.json({ hcid, callSid: data.sid, status: data.status });
+  } catch (err) {
+    console.error("[call/start] error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // TwiML webhook — Twilio calls this when the outbound call is answered.
 // Returns <Connect><Stream> to start bidirectional audio.
 app.post("/call/twiml", (req, res) => {
