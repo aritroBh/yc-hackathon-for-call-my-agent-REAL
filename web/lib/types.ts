@@ -191,3 +191,42 @@ export interface OnboardingAnswers {
   languages: Language[];
   priority: "lowest-price" | "fastest-delivery" | "bulk-discount" | "quality-certs";
 }
+
+/**
+ * The sourcing plan the agent drafts from onboarding answers and the
+ * buyer refines on `/plan` before any calls go out. Produced by
+ * `/api/plan/generate`, mutated by `/api/plan/refine`, held in the
+ * store under `plan`. Shape is the contract between those routes and
+ * the `/planning` + `/plan` screens — keep them in sync.
+ */
+export interface PlanSupplier {
+  name: string;
+  city: string;
+  /** ISO-ish two-letter code shown in the card, e.g. "NG", "GH". */
+  countryCode: string;
+  country: string;
+  language: Language;
+}
+
+export interface PlanBudget {
+  targetUnit: number;
+  capUnit: number;
+  units: number;
+  estSpend: number;
+}
+
+export interface SourcingPlan {
+  /** Lowercased noun phrase, e.g. "leather sandals". */
+  productLabel: string;
+  /** One-line agent summary, e.g. "I'll call 6 suppliers across…". */
+  summary: string;
+  regions: string[];
+  suppliers: PlanSupplier[];
+  estMinutes: number;
+  budget: PlanBudget;
+  callStrategy: { mode: string; order: string };
+  /** 3–4 negotiation bullets. */
+  negotiation: string[];
+  /** Human label for the chosen onboarding priority. */
+  priorityLabel: string;
+}
