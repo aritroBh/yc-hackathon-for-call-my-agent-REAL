@@ -401,10 +401,12 @@ twilioWss.on("connection", (ws, req) => {
   let streamSid = null;
   let geminiHandle = null;
   let closed = false;
-  // Echo gate: reset on each audio chunk AND on turnComplete.
-  // 1200ms covers phone speaker dissipation after Gemini's last word.
-  let lastGeminiAudioMs = 0;
-  const ECHO_SUPPRESS_MS = 1200;
+  // Echo gate: block inbound ONLY while Gemini is actively sending audio,
+  // plus a 300ms tail after turnComplete for speaker dissipation.
+  // Do NOT hold the gate open for seconds after turn ends — that drops supplier replies.
+  let geminiSpeaking = false;
+  let geminiDoneAt = 0;
+  const ECHO_TAIL_MS = 300;
 
   // Transcript buffers: Gemini streams word-by-word fragments.
   // Accumulate per turn, flush on sentence-end punctuation or 600ms silence.
@@ -461,7 +463,7 @@ twilioWss.on("connection", (ws, req) => {
             languageCode: langCode,
             onAudioOutput: (audioBuf) => {
               if (closed || !streamSid || ws.readyState !== 1) return;
-              lastGeminiAudioMs = Date.now();
+              geminiSpeaking = true;
               ws.send(JSON.stringify({
                 event: "media",
                 streamSid,
@@ -469,9 +471,9 @@ twilioWss.on("connection", (ws, req) => {
               }));
             },
             onTurnComplete: () => {
-              // Gemini truly finished speaking — reset echo gate from this moment
-              lastGeminiAudioMs = Date.now();
-              flushAgent(); // flush any remaining buffered agent transcript
+              geminiSpeaking = false;
+              geminiDoneAt = Date.now();
+              flushAgent();
             },
             onAgentFragment: (frag) => {
               agentBuf += frag;
@@ -493,8 +495,8 @@ twilioWss.on("connection", (ws, req) => {
 
       } else if (frame.event === "media") {
         if (!geminiHandle) return;
-        // Drop frames that are likely acoustic echo from phone speaker → mic
-        if (Date.now() - lastGeminiAudioMs < ECHO_SUPPRESS_MS) return;
+        // Suppress only while Gemini is actively speaking or within 300ms tail
+        if (geminiSpeaking || Date.now() - geminiDoneAt < ECHO_TAIL_MS) return;
         const mulaw = Buffer.from(frame.media.payload, "base64");
         geminiHandle.sendAudio(mulaw);
 
