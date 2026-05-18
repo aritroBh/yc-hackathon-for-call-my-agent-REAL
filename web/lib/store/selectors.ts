@@ -109,8 +109,17 @@ export const selectKpis = (s: AtlasState): Kpis => {
   };
 };
 
+/**
+ * "Best" is whatever the buyer told us to optimise for in onboarding —
+ * that priority is the only ranking criterion that matters. Price is the
+ * fallback when no onboarding answers exist and the universal tie-breaker.
+ */
 export const selectBestOffer = (s: AtlasState): BestOffer | null => {
+  const priority = s.onboardingAnswers?.priority ?? "lowest-price";
+
   let best: BestOffer | null = null;
+  let bestCall: NegotiationCall | null = null;
+
   for (const call of Object.values(s.calls)) {
     const price = call.result?.quoted_price;
     if (call.status !== "completed" || price == null) continue;
@@ -118,21 +127,54 @@ export const selectBestOffer = (s: AtlasState): BestOffer | null => {
     const meta = supplierMeta(sup);
     const units = s.rfq?.items[0]?.quantity ?? 0;
     const cap = s.rfq?.items[0]?.target_unit_price ?? 0;
-    if (!best || price < best.unitPrice) {
-      best = {
-        callId: call.id,
-        supplierName: sup?.name ?? "Unknown",
-        city: meta.city,
-        region: meta.region,
-        unitPrice: price,
-        units,
-        leadDays: leadDaysOf(call),
-        totalSaved: Math.max(0, (cap - price) * units),
-      };
+
+    const candidate: BestOffer = {
+      callId: call.id,
+      supplierName: sup?.name ?? "Unknown",
+      city: meta.city,
+      region: meta.region,
+      unitPrice: price,
+      units,
+      leadDays: leadDaysOf(call),
+      totalSaved: Math.max(0, (cap - price) * units),
+    };
+
+    if (!best || beats(priority, call, candidate, bestCall!, best)) {
+      best = candidate;
+      bestCall = call;
     }
   }
   return best;
 };
+
+/** True when `call`/`cand` is a better fit than `bestCall`/`best` for the
+ *  buyer's chosen priority. Price is the tie-breaker everywhere. */
+function beats(
+  priority: NonNullable<AtlasState["onboardingAnswers"]>["priority"],
+  call: NegotiationCall,
+  cand: BestOffer,
+  bestCall: NegotiationCall,
+  best: BestOffer,
+): boolean {
+  const byPrice = cand.unitPrice < best.unitPrice;
+
+  switch (priority) {
+    case "fastest-delivery": {
+      const a = cand.leadDays ?? Number.POSITIVE_INFINITY;
+      const b = best.leadDays ?? Number.POSITIVE_INFINITY;
+      return a !== b ? a < b : byPrice;
+    }
+    case "quality-certs": {
+      const a = call.result?.confidence_score ?? 0;
+      const b = bestCall.result?.confidence_score ?? 0;
+      return a !== b ? a > b : byPrice;
+    }
+    case "bulk-discount":
+    case "lowest-price":
+    default:
+      return byPrice;
+  }
+}
 
 export const selectRegionRows = memo(
   (s) => [s.calls, s.suppliers, s.callingStarted],

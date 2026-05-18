@@ -33,6 +33,30 @@ interface ChatSlice {
   agentTyping: boolean;
 }
 
+export type DealStatus = "idle" | "ready" | "signing" | "paid" | "error";
+
+/** The post-call "sign & pay the best deal" flow. `status` drives the
+ *  interrupting modal: it flips to `ready` automatically once every call
+ *  reaches a terminal state and at least one supplier quoted. */
+export interface DealSlice {
+  status: DealStatus;
+  dismissed: boolean;
+  paymentId: string | null;
+  receiptEmail: string | null;
+  error: string | null;
+}
+
+export interface SignDealInput {
+  supplierName: string;
+  amount: number;
+  currency: string;
+  rfqId: string;
+  rfqTitle: string;
+  partName: string;
+  quantity: number;
+  leadDays: number | null;
+}
+
 export interface AtlasState {
   rfq: RFQ | null;
   suppliers: Record<string, Supplier>;
@@ -47,6 +71,7 @@ export interface AtlasState {
   callingStarted: boolean;
 
   chat: ChatSlice;
+  deal: DealSlice;
 
   /** Onboarding answers, captured at "Start sourcing" and read by
    *  `/planning` to draft the plan. Survives client-side navigation. */
@@ -110,8 +135,22 @@ export interface AtlasState {
   /** Set a run's plan by id (mirrors to live if active). */
   setRunPlan: (runId: string, plan: SourcingPlan | null) => void;
 
+  /** Force the sign-the-deal modal open (e.g. the BestOffer banner button). */
+  openDealModal: () => void;
+  dismissDealModal: () => void;
+  /** Trigger Sponge payment + receipt email for the chosen best deal. */
+  signDeal: (input: SignDealInput) => Promise<void>;
+
   reset: () => void;
 }
+
+const initialDeal: DealSlice = {
+  status: "idle",
+  dismissed: false,
+  paymentId: null,
+  receiptEmail: null,
+  error: null,
+};
 
 const COST_PER_CALL_MINUTE = 0.18;
 
@@ -166,6 +205,7 @@ export const useAtlas = create<AtlasState>()(
   callingStarted: false,
 
   chat: { expanded: false, messages: seedChat, unread: 0, agentTyping: false },
+  deal: initialDeal,
 
   onboardingAnswers: null,
   plan: null,
@@ -290,8 +330,22 @@ export const useAtlas = create<AtlasState>()(
           });
         }
 
+        const anyQuote = allCalls.some(
+          (c) => c.status === "completed" && c.result?.quoted_price != null,
+        );
+        // Once every call is terminal and someone quoted, surface the
+        // "sign the best deal" prompt — unless the buyer already acted.
+        const deal: DealSlice =
+          allDone &&
+          anyQuote &&
+          state.deal.status === "idle" &&
+          !state.deal.dismissed
+            ? { ...state.deal, status: "ready" }
+            : state.deal;
+
         set({
           calls,
+          deal,
           chat:
             added.length === 0
               ? state.chat
@@ -417,6 +471,52 @@ export const useAtlas = create<AtlasState>()(
   setResearchMessage: (researchMessage) => set({ researchMessage }),
   setResearchedCompanies: (researchedCompanies) => set({ researchedCompanies }),
 
+  openDealModal: () =>
+    set((s) =>
+      s.deal.status === "paid" || s.deal.status === "signing"
+        ? { deal: { ...s.deal, dismissed: false } }
+        : { deal: { ...s.deal, status: "ready", dismissed: false } },
+    ),
+
+  dismissDealModal: () =>
+    set((s) => ({ deal: { ...s.deal, dismissed: true } })),
+
+  signDeal: async (input) => {
+    set((s) => ({
+      deal: { ...s.deal, status: "signing", dismissed: false, error: null },
+    }));
+    try {
+      const res = await fetch("/api/deal/sign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const data = (await res.json()) as {
+        paymentId?: string;
+        receiptEmail?: string;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error || `Sign failed (${res.status})`);
+      set((s) => ({
+        deal: {
+          ...s.deal,
+          status: "paid",
+          paymentId: data.paymentId ?? null,
+          receiptEmail: data.receiptEmail ?? null,
+          error: null,
+        },
+      }));
+    } catch (err) {
+      set((s) => ({
+        deal: {
+          ...s.deal,
+          status: "error",
+          error: err instanceof Error ? err.message : "Payment failed",
+        },
+      }));
+    }
+  },
+
   snapshotActiveRun: () => {
     const s = get();
     const id = s.activeRunId;
@@ -521,6 +621,7 @@ export const useAtlas = create<AtlasState>()(
       ...liveFieldsFrom(seeded.runs[DEMO_RUN_ID]),
       callingStarted: false,
       chat: { expanded: false, messages: seedChat, unread: 0, agentTyping: false },
+      deal: initialDeal,
       onboardingAnswers: null,
       runs: seeded.runs,
       runOrder: seeded.runOrder,

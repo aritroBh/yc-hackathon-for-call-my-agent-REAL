@@ -11,6 +11,7 @@ import { DUR, EASE } from "@/lib/motion/presets";
 
 export function BestOfferBanner() {
   const best = useAtlas(useShallow(selectBestOffer));
+  const openDealModal = useAtlas((s) => s.openDealModal);
 
   return (
     <div
@@ -41,7 +42,9 @@ export function BestOfferBanner() {
                 deposit, balance on delivery
               </p>
             </div>
-            <Button size="sm">Lock this deal</Button>
+            <Button size="sm" onClick={openDealModal}>
+              Lock this deal
+            </Button>
           </motion.div>
         ) : (
           <div

@@ -19,6 +19,7 @@ import { RegionBreakdown } from "./region-breakdown";
 import { StatusDonut } from "./status-donut";
 import { NowCallingStrip } from "./now-calling-strip";
 import { LedgerTable } from "./ledger-table";
+import { SignDealModal } from "./sign-deal-modal";
 
 /**
  * Pre-campaign screen, now research-aware. Reflects the Phase-2
@@ -258,6 +259,8 @@ function LiveDashboard() {
       <NowCallingStrip />
 
       <LedgerTable />
+
+      <SignDealModal />
     </motion.div>
   );
 }
