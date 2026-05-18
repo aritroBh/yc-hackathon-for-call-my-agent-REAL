@@ -40,6 +40,98 @@ const server = createServer(app);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// ── Live transcript SSE + English translation ─────────────────────────
+
+const sseClients = new Set();
+const transcriptLog = []; // in-memory ring buffer, last 200 lines
+
+function pushTranscript(role, original, english) {
+  const entry = { ts: Date.now(), role, original, english };
+  transcriptLog.push(entry);
+  if (transcriptLog.length > 200) transcriptLog.shift();
+  const payload = JSON.stringify(entry);
+  for (const res of sseClients) {
+    try { res.write(`data: ${payload}\n\n`); } catch { sseClients.delete(res); }
+  }
+}
+
+// Translate text to English using Gemini text API (fire-and-forget)
+async function translateToEnglish(text) {
+  try {
+    const ai = getGeminiAI();
+    const result = await ai.models.generateContent({
+      model: "gemini-2.0-flash-lite",
+      contents: [{ role: "user", parts: [{ text: `Translate to English (keep it concise, conversational tone). Return ONLY the translation, no explanation:\n\n${text}` }] }],
+    });
+    return result.text?.trim() || text;
+  } catch {
+    return text; // fall back to original if translation fails
+  }
+}
+
+// SSE endpoint — dashboard / demo viewer connects here
+app.get("/transcript-events", (req, res) => {
+  res.set({
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "Access-Control-Allow-Origin": "*",
+  });
+  res.flushHeaders();
+  // Send recent history on connect
+  for (const entry of transcriptLog) {
+    res.write(`data: ${JSON.stringify(entry)}\n\n`);
+  }
+  sseClients.add(res);
+  req.on("close", () => sseClients.delete(res));
+});
+
+// Simple HTML viewer — open http://localhost:3001/transcript in a browser
+app.get("/transcript", (_req, res) => {
+  res.type("text/html").send(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>HAGGL Live Transcript</title>
+<style>
+  body { background:#0f0f0f; color:#e0e0e0; font-family:system-ui,sans-serif; margin:0; padding:20px; }
+  h2 { color:#a78bfa; margin-bottom:16px; }
+  #log { display:flex; flex-direction:column; gap:10px; max-width:800px; }
+  .turn { padding:10px 14px; border-radius:8px; font-size:14px; line-height:1.5; }
+  .agent { background:#1e1b4b; border-left:3px solid #818cf8; }
+  .supplier { background:#1a2e1a; border-left:3px solid #4ade80; }
+  .label { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; opacity:.6; margin-bottom:4px; }
+  .english { color:#e0e0e0; }
+  .original { color:#666; font-size:12px; margin-top:4px; }
+  .ts { color:#555; font-size:10px; float:right; }
+</style>
+</head>
+<body>
+<h2>HAGGL Live Transcript (English)</h2>
+<div id="log"></div>
+<script>
+const log = document.getElementById('log');
+const es = new EventSource('/transcript-events');
+es.onmessage = e => {
+  const d = JSON.parse(e.data);
+  const div = document.createElement('div');
+  div.className = 'turn ' + d.role;
+  const t = new Date(d.ts).toLocaleTimeString();
+  div.innerHTML =
+    '<div class="label">' + d.role + '<span class="ts">' + t + '</span></div>' +
+    '<div class="english">' + escHtml(d.english) + '</div>' +
+    (d.original !== d.english ? '<div class="original">' + escHtml(d.original) + '</div>' : '');
+  log.appendChild(div);
+  div.scrollIntoView({ behavior:'smooth' });
+};
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+</body>
+</html>`);
+});
+
 // ── Gemini Live audio helpers (inline, no external deps) ─────────────
 
 function mulawDecode(mulawBuf) {
@@ -351,9 +443,11 @@ twilioWss.on("connection", (ws, req) => {
             },
             onAgentTranscript: (text) => {
               console.log(`[twilio-stream] agent: "${text.slice(0, 80)}"`);
+              translateToEnglish(text).then(eng => pushTranscript("agent", text, eng));
             },
             onSupplierTranscript: (text) => {
               console.log(`[twilio-stream] supplier: "${text.slice(0, 80)}"`);
+              translateToEnglish(text).then(eng => pushTranscript("supplier", text, eng));
             },
           });
           console.log(`[twilio-stream] Gemini Live session ready hcid=${hcid}`);
