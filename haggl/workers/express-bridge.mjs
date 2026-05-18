@@ -57,15 +57,21 @@ function pushTranscript(role, original, english) {
 
 // Translate text to English using Gemini text API (fire-and-forget)
 async function translateToEnglish(text) {
+  if (!text?.trim()) return text;
   try {
     const ai = getGeminiAI();
     const result = await ai.models.generateContent({
       model: "gemini-2.0-flash-lite",
-      contents: [{ role: "user", parts: [{ text: `Translate to English (keep it concise, conversational tone). Return ONLY the translation, no explanation:\n\n${text}` }] }],
+      contents: [{ role: "user", parts: [{ text: `Translate to English (concise, conversational). Return ONLY the translation:\n\n${text}` }] }],
     });
-    return result.text?.trim() || text;
-  } catch {
-    return text; // fall back to original if translation fails
+    // @google/genai v2: response.text is a getter; also try candidates path
+    const translated =
+      result.text?.trim() ||
+      result.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    return translated || text;
+  } catch (err) {
+    console.warn("[translate] failed:", err.message);
+    return text;
   }
 }
 
@@ -333,13 +339,14 @@ async function openGeminiSession(systemPromptText, opts = {}) {
           }
           const inputText = msg.serverContent?.inputTranscription?.text;
           if (inputText) {
-            console.log(`[gemini-live] supplier: "${inputText.slice(0, 80)}"`);
-            opts.onSupplierTranscript?.(inputText);
+            opts.onSupplierFragment?.(inputText);
           }
           const outputText = msg.serverContent?.outputTranscription?.text;
           if (outputText) {
-            console.log(`[gemini-live] agent: "${outputText.slice(0, 80)}"`);
-            opts.onAgentTranscript?.(outputText);
+            opts.onAgentFragment?.(outputText);
+          }
+          if (msg.serverContent?.turnComplete) {
+            opts.onTurnComplete?.();
           }
           // Audio response from Gemini
           const b64Audio = msg.data;
@@ -394,10 +401,30 @@ twilioWss.on("connection", (ws, req) => {
   let streamSid = null;
   let geminiHandle = null;
   let closed = false;
-  // Acoustic echo gate: suppress inbound audio for 400ms after we send Gemini audio to
-  // the phone. Phone speaker → mic coupling causes self-reply in longer calls.
+  // Echo gate: reset on each audio chunk AND on turnComplete.
+  // 1200ms covers phone speaker dissipation after Gemini's last word.
   let lastGeminiAudioMs = 0;
-  const ECHO_SUPPRESS_MS = 400;
+  const ECHO_SUPPRESS_MS = 1200;
+
+  // Transcript buffers: Gemini streams word-by-word fragments.
+  // Accumulate per turn, flush on sentence-end punctuation or 600ms silence.
+  let agentBuf = "", supplierBuf = "";
+  let agentTimer = null, supplierTimer = null;
+
+  function flushAgent() {
+    const text = agentBuf.trim();
+    agentBuf = "";
+    if (!text) return;
+    console.log(`[twilio-stream] agent: "${text.slice(0, 80)}"`);
+    translateToEnglish(text).then(eng => pushTranscript("agent", text, eng));
+  }
+  function flushSupplier() {
+    const text = supplierBuf.trim();
+    supplierBuf = "";
+    if (!text) return;
+    console.log(`[twilio-stream] supplier: "${text.slice(0, 80)}"`);
+    translateToEnglish(text).then(eng => pushTranscript("supplier", text, eng));
+  }
 
   const systemPrompt =
     `You are a Bengali-speaking procurement agent for HAGGL, negotiating to purchase ` +
@@ -441,13 +468,22 @@ twilioWss.on("connection", (ws, req) => {
                 media: { payload: audioBuf.toString("base64") },
               }));
             },
-            onAgentTranscript: (text) => {
-              console.log(`[twilio-stream] agent: "${text.slice(0, 80)}"`);
-              translateToEnglish(text).then(eng => pushTranscript("agent", text, eng));
+            onTurnComplete: () => {
+              // Gemini truly finished speaking — reset echo gate from this moment
+              lastGeminiAudioMs = Date.now();
+              flushAgent(); // flush any remaining buffered agent transcript
             },
-            onSupplierTranscript: (text) => {
-              console.log(`[twilio-stream] supplier: "${text.slice(0, 80)}"`);
-              translateToEnglish(text).then(eng => pushTranscript("supplier", text, eng));
+            onAgentFragment: (frag) => {
+              agentBuf += frag;
+              clearTimeout(agentTimer);
+              if (/[।?.!\n]/.test(frag)) { flushAgent(); }
+              else { agentTimer = setTimeout(flushAgent, 600); }
+            },
+            onSupplierFragment: (frag) => {
+              supplierBuf += frag;
+              clearTimeout(supplierTimer);
+              if (/[।?.!\n]/.test(frag)) { flushSupplier(); }
+              else { supplierTimer = setTimeout(flushSupplier, 600); }
             },
           });
           console.log(`[twilio-stream] Gemini Live session ready hcid=${hcid}`);
