@@ -302,6 +302,10 @@ twilioWss.on("connection", (ws, req) => {
   let streamSid = null;
   let geminiHandle = null;
   let closed = false;
+  // Acoustic echo gate: suppress inbound audio for 400ms after we send Gemini audio to
+  // the phone. Phone speaker → mic coupling causes self-reply in longer calls.
+  let lastGeminiAudioMs = 0;
+  const ECHO_SUPPRESS_MS = 400;
 
   const systemPrompt =
     `You are a Bengali-speaking procurement agent for HAGGL, negotiating to purchase ` +
@@ -309,34 +313,27 @@ twilioWss.on("connection", (ws, req) => {
     `Target price: $4.25/pair. Hard ceiling: $5.00/pair. Delivery: within 4 weeks.\n\n` +
 
     `VOICE RULES — NON-NEGOTIABLE:\n` +
-    `- Max 2 sentences per response. Prefer 1.\n` +
-    `- Ask ONE question per turn. Never two questions in the same response.\n` +
-    `- No lists, bullet points, numbered items, or markdown — this is a phone call.\n` +
-    `- Always use contractions and natural shortened forms in Bengali.\n` +
-    `- Start sentences naturally: "আচ্ছা,", "হ্যাঁ,", "দেখুন —", "আসলে —", "বলুন,"\n` +
-    `- BANNED acknowledgments (never use): "অবশ্যই", "নিশ্চয়ই", "ধন্যবাদ আপনার মতামতের জন্য", "আমি বুঝতে পারছি"\n` +
-    `- Rotate short acknowledgments (max once per 4 turns each): "ঠিক আছে।" / "বুঝলাম।" / "হ্যাঁ।" / "আচ্ছা।"\n` +
-    `- Use stall phrases when thinking: "একটু ভাবছি।" / "এক সেকেন্ড।" / "ঠিকঠাক বলছি —"\n\n` +
+    `- ONE sentence per response. Two only if genuinely required. Never more.\n` +
+    `- Ask ONE question per turn. Never two.\n` +
+    `- No lists, bullet points, or markdown — this is a phone call.\n` +
+    `- Start naturally: "আচ্ছা,", "হ্যাঁ,", "দেখুন —", "বলুন,"\n` +
+    `- BANNED words: "অবশ্যই", "নিশ্চয়ই", "ধন্যবাদ আপনার মতামতের জন্য", "আমি বুঝতে পারছি"\n` +
+    `- Short acknowledgments only (max once per 4 turns each): "ঠিক আছে।" / "বুঝলাম।" / "হ্যাঁ।" / "আচ্ছা।"\n` +
+    `- Stall when thinking: "এক সেকেন্ড।" / "ভাবছি —"\n\n` +
 
     `LANGUAGE RULES:\n` +
-    `- Primary language: Bengali (formal আপনি form).\n` +
-    `- If supplier speaks Hindi, respond briefly in Hindi then return to Bengali.\n` +
-    `- If supplier speaks English, respond in English briefly then return to Bengali.\n\n` +
+    `- Bengali (formal আপনি) always. One brief Hindi/English mirror if they switch, then back.\n\n` +
 
-    `NEGOTIATION APPROACH:\n` +
-    `- Build rapport first — one or two warm exchanges before price.\n` +
-    `- Anchor low. Acknowledge their constraints. Find middle ground.\n` +
-    `- Confirm any agreed price and delivery terms explicitly before ending.\n\n` +
+    `NEGOTIATION:\n` +
+    `- One warm exchange before price. Anchor low. Confirm final terms explicitly.\n\n` +
 
-    `TURN-TAKING RULE: After you finish speaking, go completely silent and wait. ` +
-    `Do not speak again until the supplier has responded. Never reply to your own audio.`;
+    `TURN RULE: Finish speaking → go silent → wait. Never speak again until supplier replies.`;
 
   ws.on("message", async (raw) => {
     try {
       const frame = JSON.parse(raw.toString());
 
       if (frame.event === "start") {
-        // Notionbrain pattern: open Gemini HERE, not on WS connect
         streamSid = frame.start?.streamSid;
         console.log(`[twilio-stream] streamSid=${streamSid}`);
 
@@ -345,6 +342,7 @@ twilioWss.on("connection", (ws, req) => {
             languageCode: langCode,
             onAudioOutput: (audioBuf) => {
               if (closed || !streamSid || ws.readyState !== 1) return;
+              lastGeminiAudioMs = Date.now();
               ws.send(JSON.stringify({
                 event: "media",
                 streamSid,
@@ -364,8 +362,9 @@ twilioWss.on("connection", (ws, req) => {
         }
 
       } else if (frame.event === "media") {
-        // Only forward audio AFTER Gemini session is open (after start event)
         if (!geminiHandle) return;
+        // Drop frames that are likely acoustic echo from phone speaker → mic
+        if (Date.now() - lastGeminiAudioMs < ECHO_SUPPRESS_MS) return;
         const mulaw = Buffer.from(frame.media.payload, "base64");
         geminiHandle.sendAudio(mulaw);
 
