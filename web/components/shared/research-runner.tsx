@@ -24,6 +24,19 @@ import type { ResearchedSupplier } from "@/lib/types";
 
 let inFlight = false;
 
+function humanError(raw: unknown): string {
+  if (!raw) return "Research failed.";
+  const s = typeof raw === "string" ? raw : JSON.stringify(raw);
+  try {
+    const j = typeof raw === "string" ? JSON.parse(raw) : raw;
+    const msg =
+      j?.error?.message ?? j?.message ?? j?.error ?? null;
+    if (typeof msg === "string" && msg.length > 0) return msg;
+  } catch {}
+  if (s.startsWith("{") || s.startsWith("[")) return "Research failed.";
+  return s;
+}
+
 export function ResearchRunner() {
   const status = useAtlas((s) => s.researchStatus);
   const answers = useAtlas((s) => s.onboardingAnswers);
@@ -70,7 +83,8 @@ export function ResearchRunner() {
           let msg = `Research backend error (${res.status}).`;
           try {
             const j = await res.json();
-            if (j?.error) msg = String(j.error);
+            if (j?.error) msg = humanError(j.error);
+            else if (j?.message) msg = humanError(j.message);
           } catch {
             /* not JSON */
           }
@@ -165,7 +179,7 @@ export function ResearchRunner() {
               case "error":
                 st.patchRunResearch(runId, {
                   status: "error",
-                  message: String(evt.message ?? "Research failed."),
+                  message: humanError(evt.message),
                 });
                 break;
             }
