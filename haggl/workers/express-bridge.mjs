@@ -61,7 +61,7 @@ async function translateToEnglish(text) {
   try {
     const ai = getGeminiAI();
     const result = await ai.models.generateContent({
-      model: "gemini-2.0-flash-lite",
+      model: "gemini-2.5-flash",
       contents: [{ role: "user", parts: [{ text: `Translate to English (concise, conversational). Return ONLY the translation:\n\n${text}` }] }],
     });
     // @google/genai v2: response.text is a getter; also try candidates path
