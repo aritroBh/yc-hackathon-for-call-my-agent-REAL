@@ -56,9 +56,9 @@ export function PlanCard({
 
       {/* Suppliers — spacing only, no row separators */}
       <motion.div layout="position" className="flex flex-col">
-        {plan.suppliers.map((s) => (
+        {plan.suppliers.map((s, i) => (
           <div
-            key={`${s.name}-${s.city}`}
+            key={`${s.name}-${s.city}-${i}`}
             className="flex items-center gap-3 py-1.5"
           >
             <span className="flex-1 truncate text-[14px] font-semibold text-ink">
