@@ -168,9 +168,10 @@ function getBridgeWsUrl() {
 app.post("/call/twiml", (req, res) => {
   const hcid = req.query.hcid || `twilio_${Date.now()}`;
   const lang = req.query.lang || "bn";
+  // & must be &amp; in XML attributes
   const wsUrl =
     `${getBridgeWsUrl()}/call/stream` +
-    `?hcid=${encodeURIComponent(hcid)}&lang=${encodeURIComponent(lang)}`;
+    `?hcid=${encodeURIComponent(hcid)}&amp;lang=${encodeURIComponent(lang)}`;
   console.log(`[twiml] stream url: ${wsUrl}`);
   res.type("text/xml").send(
     `<?xml version="1.0" encoding="UTF-8"?>` +
@@ -198,35 +199,46 @@ function getGeminiAI() {
 async function openGeminiSession(systemPromptText, opts = {}) {
   const ai = getGeminiAI();
 
-  // PCM16 24kHz → PCM16 8kHz (already have resampleLinear in this file)
   function downsample24kTo8k(pcm) { return resampleLinear(pcm, 24000, 8000); }
-  // PCM16 8kHz → PCM16 16kHz
   function upsample8kTo16k(pcm) { return resampleLinear(pcm, 8000, 16000); }
 
   let liveSession;
   try {
     liveSession = await ai.live.connect({
-      model: "gemini-live-2.5-flash-preview",
+      model: "gemini-3.1-flash-live-preview",
       config: {
-        inputAudioTranscription: {},
-        outputAudioTranscription: {},
         responseModalities: [Modality.AUDIO],
         systemInstruction: systemPromptText,
-        realtimeInputConfig: { automaticActivityDetection: {} },
         speechConfig: {
           voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } },
           ...(opts.languageCode ? { languageCode: opts.languageCode } : {}),
         },
       },
       callbacks: {
-        onopen: () => console.log("[gemini-live] connected"),
+        onopen: () => console.log("[gemini-live] websocket open, waiting for setupComplete"),
         onmessage: (msg) => {
+          if (msg.setupComplete) {
+            console.log("[gemini-live] setup complete — ready");
+            // Notionbrain pattern: inject exact opening cue after setup, then wait for supplier
+            const openingCue = opts.openingCue ||
+              `[Outbound call just connected. Say EXACTLY this in Bengali and nothing more: ` +
+              `"নমস্কার! আমি HAGGL-এর পক্ষ থেকে কথা বলছি। আপনি কি এখন কথা বলতে পারবেন?" ` +
+              `— then stop speaking and wait silently for the supplier to respond. ` +
+              `Do not say anything else until they reply.]`;
+            try { liveSession.sendRealtimeInput({ text: openingCue }); } catch { /* ignore */ }
+            opts.onSetupComplete?.();
+          }
           const inputText = msg.serverContent?.inputTranscription?.text;
-          if (inputText) opts.onSupplierTranscript?.(inputText);
-
+          if (inputText) {
+            console.log(`[gemini-live] supplier: "${inputText.slice(0, 80)}"`);
+            opts.onSupplierTranscript?.(inputText);
+          }
           const outputText = msg.serverContent?.outputTranscription?.text;
-          if (outputText) opts.onAgentTranscript?.(outputText);
-
+          if (outputText) {
+            console.log(`[gemini-live] agent: "${outputText.slice(0, 80)}"`);
+            opts.onAgentTranscript?.(outputText);
+          }
+          // Audio response from Gemini
           const b64Audio = msg.data;
           if (b64Audio) {
             const pcm24k = Buffer.from(b64Audio, "base64");
@@ -236,11 +248,11 @@ async function openGeminiSession(systemPromptText, opts = {}) {
           }
         },
         onerror: (e) => {
-          console.error("[gemini-live] error:", e.message);
-          opts.onError?.(new Error(e.message));
+          console.error("[gemini-live] error:", e?.message ?? e);
+          opts.onError?.(new Error(String(e?.message ?? e)));
         },
         onclose: (e) => {
-          console.log(`[gemini-live] closed code=${e.code}`);
+          console.log(`[gemini-live] closed code=${e.code} reason=${e.reason}`);
           opts.onClose?.();
         },
       },
@@ -250,13 +262,11 @@ async function openGeminiSession(systemPromptText, opts = {}) {
   }
 
   return {
+    // Accept mulaw Buffer — decode → upsample → send PCM16k to Gemini
     sendAudio(mulawBuf) {
       const pcm8k = mulawDecode(mulawBuf);
       const pcm16k = upsample8kTo16k(pcm8k);
       liveSession.sendRealtimeInput({ audio: { data: pcm16k.toString("base64"), mimeType: "audio/pcm;rate=16000" } });
-    },
-    sendPCM16k(pcmBuf) {
-      liveSession.sendRealtimeInput({ audio: { data: pcmBuf.toString("base64"), mimeType: "audio/pcm;rate=16000" } });
     },
     sendText(text) {
       liveSession.sendRealtimeInput({ text });
@@ -267,6 +277,9 @@ async function openGeminiSession(systemPromptText, opts = {}) {
   };
 }
 
+// ── Notionbrain pattern: open Gemini ONLY after receiving the Twilio `start` event ──
+// This eliminates garbage audio priming the model before the conversation begins,
+// which was causing Gemini to reply to its own audio output (feedback loop).
 twilioWss.on("connection", (ws, req) => {
   const url = new URL(req.url || "", "http://localhost");
   const hcid = url.searchParams.get("hcid") || `twilio_${Date.now()}`;
@@ -278,60 +291,61 @@ twilioWss.on("connection", (ws, req) => {
   let streamSid = null;
   let geminiHandle = null;
   let closed = false;
-  const earlyAudio = []; // buffer frames that arrive before Gemini session opens
 
   const systemPrompt =
-    `You are a Bengali-speaking procurement agent for HAGGL negotiating for 500 pairs ` +
-    `of men's leather sandals, sizes 40-45, full-grain. Target price $4.25/pair, hard cap $5.00/pair, ` +
-    `delivery within 4 weeks. Speak primarily in Bengali using formal আপনি. ` +
-    `Be warm and relationship-first — build rapport before price. ` +
-    `When you have a clear price offer, confirm it explicitly.`;
+    `You are a Bengali-speaking procurement agent for HAGGL. You are negotiating to purchase ` +
+    `500 pairs of men's leather sandals (sizes 40–45, full-grain). ` +
+    `Target price: $4.25/pair. Hard ceiling: $5.00/pair. Required delivery: within 4 weeks. ` +
+    `\n\nLanguage & style rules:\n` +
+    `- Speak in Bengali (formal আপনি form) as the PRIMARY language.\n` +
+    `- If the supplier speaks Hindi or English, reply in their language briefly, then gently return to Bengali.\n` +
+    `- Be warm and relationship-first — build genuine rapport before discussing price.\n` +
+    `- Use natural conversational fillers: "আচ্ছা", "হ্যাঁ", "ঠিক আছে", "বুঝলাম" to sound human.\n` +
+    `- Pause naturally after asking a question. NEVER speak while the other person is talking.\n` +
+    `- When negotiating price: anchor low, acknowledge their constraints, find a middle ground.\n` +
+    `- Confirm any agreed price or terms explicitly before ending the call.\n` +
+    `\nTurn-taking rule: After you finish speaking, go completely silent and wait. ` +
+    `Do not speak again until the supplier has replied. Never reply to your own audio.`;
 
-  openGeminiSession(systemPrompt, {
-    languageCode: langCode,
-    onAudioOutput: (audioBuf) => {
-      if (closed || !streamSid || ws.readyState !== 1) return;
-      ws.send(JSON.stringify({
-        event: "media",
-        streamSid,
-        media: { payload: audioBuf.toString("base64") },
-      }));
-    },
-    onAgentTranscript: (text) => {
-      console.log(`[twilio-stream] agent: "${text.slice(0, 80)}"`);
-    },
-    onSupplierTranscript: (text) => {
-      console.log(`[twilio-stream] supplier: "${text.slice(0, 80)}"`);
-    },
-  }).then((handle) => {
-    geminiHandle = handle;
-    console.log(`[twilio-stream] Gemini Live open hcid=${hcid}, flushing ${earlyAudio.length} early frames`);
-    for (const pcm16k of earlyAudio) {
-      geminiHandle.sendPCM16k(pcm16k);
-    }
-    earlyAudio.length = 0;
-  }).catch((err) => {
-    console.error(`[twilio-stream] Gemini Live open failed:`, err.message);
-  });
-
-  ws.on("message", (raw) => {
+  ws.on("message", async (raw) => {
     try {
-      const msg = JSON.parse(raw.toString());
-      if (msg.event === "start") {
-        streamSid = msg.start?.streamSid;
+      const frame = JSON.parse(raw.toString());
+
+      if (frame.event === "start") {
+        // Notionbrain pattern: open Gemini HERE, not on WS connect
+        streamSid = frame.start?.streamSid;
         console.log(`[twilio-stream] streamSid=${streamSid}`);
-      } else if (msg.event === "media" && msg.media?.track === "inbound") {
-        const mulaw = Buffer.from(msg.media.payload, "base64");
-        const pcm8k = mulawDecode(mulaw);
-        const pcm16k = resampleLinear(pcm8k, 8000, 16000);
-        if (!geminiHandle) {
-          // Buffer until session opens (keep last 50 frames ~3s to avoid unbounded growth)
-          earlyAudio.push(pcm16k);
-          if (earlyAudio.length > 50) earlyAudio.shift();
-          return;
+
+        try {
+          geminiHandle = await openGeminiSession(systemPrompt, {
+            languageCode: langCode,
+            onAudioOutput: (audioBuf) => {
+              if (closed || !streamSid || ws.readyState !== 1) return;
+              ws.send(JSON.stringify({
+                event: "media",
+                streamSid,
+                media: { payload: audioBuf.toString("base64") },
+              }));
+            },
+            onAgentTranscript: (text) => {
+              console.log(`[twilio-stream] agent: "${text.slice(0, 80)}"`);
+            },
+            onSupplierTranscript: (text) => {
+              console.log(`[twilio-stream] supplier: "${text.slice(0, 80)}"`);
+            },
+          });
+          console.log(`[twilio-stream] Gemini Live session ready hcid=${hcid}`);
+        } catch (err) {
+          console.error(`[twilio-stream] Gemini Live open failed:`, err.message);
         }
-        geminiHandle.sendPCM16k(pcm16k);
-      } else if (msg.event === "stop") {
+
+      } else if (frame.event === "media") {
+        // Only forward audio AFTER Gemini session is open (after start event)
+        if (!geminiHandle) return;
+        const mulaw = Buffer.from(frame.media.payload, "base64");
+        geminiHandle.sendAudio(mulaw);
+
+      } else if (frame.event === "stop") {
         console.log(`[twilio-stream] stream stopped`);
         if (geminiHandle) { geminiHandle.close(); geminiHandle = null; }
       }
@@ -346,28 +360,6 @@ twilioWss.on("connection", (ws, req) => {
 
   ws.on("error", (err) => {
     console.error(`[twilio-stream] WS error hcid=${hcid}:`, err.message);
-  });
-});
-
-// ── Socket.io: dashboard clients ─────────────────────
-
-io.on("connection", (socket) => {
-  console.log(`[io] Dashboard client connected: ${socket.id}`);
-
-  socket.on("call_status_changed", (data) => {
-    io.emit("call_status_changed", data);
-  });
-
-  socket.on("transcript_delta", (data) => {
-    io.emit("transcript_delta", data);
-  });
-
-  socket.on("reasoning_trace", (data) => {
-    io.emit("reasoning_trace", data);
-  });
-
-  socket.on("disconnect", () => {
-    console.log(`[io] Dashboard client disconnected: ${socket.id}`);
   });
 });
 
