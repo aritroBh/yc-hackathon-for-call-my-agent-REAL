@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "motion/react";
-import { FileText, PhoneCall } from "lucide-react";
+import { FileText, Telescope } from "lucide-react";
 import type { SourcingPlan } from "@/lib/types";
 import { money, count } from "@/lib/format";
 
@@ -121,8 +121,8 @@ export function PlanCard({
           onClick={onStartCalling}
           className="flex items-center gap-2 rounded-md bg-clay px-5 py-3 text-[14px] font-semibold text-white shadow-sm transition-colors hover:bg-clay-deep"
         >
-          <PhoneCall className="size-4" />
-          Start calling
+          <Telescope className="size-4" />
+          Begin research
         </button>
       </motion.div>
     </motion.div>

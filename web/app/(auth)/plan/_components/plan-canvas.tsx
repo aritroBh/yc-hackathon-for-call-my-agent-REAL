@@ -17,7 +17,7 @@ interface Turn {
   content: string;
 }
 
-const COMMIT_CHIP = "Looks good — start calling";
+const COMMIT_CHIP = "Looks good — research the suppliers";
 
 function AgentBubble({ children }: { children: React.ReactNode }) {
   return (
@@ -36,7 +36,7 @@ export function PlanCanvas() {
   const router = useRouter();
   const plan = useAtlas((s) => s.plan);
   const setPlan = useAtlas((s) => s.setPlan);
-  const beginCampaign = useAtlas((s) => s.beginCampaign);
+  const createRun = useAtlas((s) => s.createRun);
 
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState("");
@@ -112,8 +112,12 @@ export function PlanCanvas() {
     if (committed) return;
     setCommitted(true);
     playDealCue();
-    beginCampaign();
-    router.push("/dashboard");
+    // Create a run from this plan (research starts; the (app)-level
+    // <ResearchRunner> owns the SSE and writes into this run by id) and
+    // open its page. Calls don't start yet — the buyer watches research
+    // connect there, then hits "Start calling" (or the demo skip).
+    const id = createRun(plan ?? null);
+    router.push(`/research/${id}`);
   }
 
   function onChip(label: string) {
@@ -148,7 +152,7 @@ export function PlanCanvas() {
         </div>
         <button
           type="button"
-          onClick={() => router.push("/dashboard")}
+          onClick={() => router.push("/")}
           className="rounded-md px-3 py-1.5 text-[14px] font-medium text-ink-2 transition-colors hover:text-ink"
         >
           Discard

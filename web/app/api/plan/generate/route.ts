@@ -112,7 +112,10 @@ export async function POST(req: Request) {
   try {
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      // The agent-proposed plan is intentionally a FAST draft — Gemini
+      // Flash Lite. The slow, high-quality pass is Gemini Deep Research,
+      // kicked off later on plan commit (see /api/plan/research).
+      model: process.env.GEMINI_PLAN_MODEL || "gemini-3.1-flash-lite",
       contents: [
         {
           role: "user",

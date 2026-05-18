@@ -4,6 +4,6 @@ import { AuthScreen } from "./_components/auth-screen";
 
 export default async function LoginPage() {
   const session = await getSession();
-  if (session) redirect("/dashboard");
+  if (session) redirect("/");
   return <AuthScreen />;
 }

@@ -26,12 +26,12 @@ export function AuthFormPanel() {
       return;
     }
     signIn({ email: email.trim(), provider: "email" });
-    router.push("/onboarding");
+    router.push("/");
   }
 
   function continueWithGoogle() {
     signInWithGoogle();
-    router.push("/onboarding");
+    router.push("/");
   }
 
   return (

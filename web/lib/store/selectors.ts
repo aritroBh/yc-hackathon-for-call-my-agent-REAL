@@ -1,5 +1,5 @@
 import type { AtlasState } from "./index";
-import type { NegotiationCall, Supplier } from "@/lib/types";
+import type { NegotiationCall, Supplier, ResearchRun } from "@/lib/types";
 
 export interface Kpis {
   placed: number;
@@ -217,3 +217,136 @@ export const selectLedgerRows = memo(
     });
   },
 );
+
+/* ── Run registry summaries (Home + Research lists + sidebar badge) ── */
+
+export interface RunSummary {
+  id: string;
+  title: string;
+  isDemo: boolean;
+  createdAt: string;
+  status: "researching" | "ready" | "calling" | "complete" | "error";
+  message: string | null;
+  dossierCount: number;
+  callsTotal: number;
+  callsDone: number;
+  dealsReached: number;
+  /** Deals whose call closed on the current calendar day. */
+  dealsToday: number;
+  bestPrice: number | null;
+  regionLabel: string;
+}
+
+const TERMINAL = new Set<NegotiationCall["status"]>([
+  "completed",
+  "capped",
+  "failed",
+  "no-answer",
+  "busy",
+  "rejected",
+  "timeout",
+]);
+
+function summarizeRun(r: ResearchRun): RunSummary {
+  const calls = Object.values(r.calls);
+  const terminal = calls.filter((c) => TERMINAL.has(c.status));
+  const deals = calls.filter(
+    (c) => c.status === "completed" && c.result?.quoted_price != null,
+  );
+  let best: number | null = null;
+  for (const c of deals) {
+    const p = c.result?.quoted_price;
+    if (p != null && (best == null || p < best)) best = p;
+  }
+
+  const today = new Date().toDateString();
+  const dealsToday = deals.filter((c) => {
+    const t = c.ended_at ?? c.updated_at;
+    return !!t && new Date(t).toDateString() === today;
+  }).length;
+
+  let status: RunSummary["status"];
+  if (r.research.status === "running") status = "researching";
+  else if (r.research.status === "error" && !r.callingStarted) status = "error";
+  else if (r.callingStarted)
+    status =
+      calls.length > 0 && terminal.length === calls.length
+        ? "complete"
+        : "calling";
+  else status = "ready";
+
+  const regions = new Set<string>();
+  for (const sup of Object.values(r.suppliers)) {
+    const region = (sup.metadata as Record<string, string>)?.region;
+    if (region && region !== "—") regions.add(region);
+  }
+  const regionLabel =
+    r.plan?.regions?.join(" & ") || [...regions].join(" & ") || "—";
+
+  return {
+    id: r.id,
+    title: r.title,
+    isDemo: !!r.isDemo,
+    createdAt: r.createdAt,
+    status,
+    message: r.research.message,
+    dossierCount: r.research.companies.length,
+    callsTotal: r.callOrder.length,
+    callsDone: terminal.length,
+    dealsReached: deals.length,
+    dealsToday,
+    bestPrice: best,
+    regionLabel,
+  };
+}
+
+/** The active run rebuilt from the live working fields, so summaries
+ *  reflect in-flight research/calls without a snapshot round-trip. */
+function liveRun(s: AtlasState): ResearchRun | null {
+  const id = s.activeRunId;
+  const base = id ? s.runs[id] : undefined;
+  if (!id || !base) return null;
+  return {
+    ...base,
+    plan: s.plan,
+    research: {
+      status: s.researchStatus,
+      message: s.researchMessage,
+      companies: s.researchedCompanies,
+    },
+    rfq: s.rfq,
+    suppliers: s.suppliers,
+    calls: s.calls,
+    callOrder: s.callOrder,
+    callingStarted: s.callingStarted,
+    campaignStartedAt: s.campaignStartedAt,
+    elapsedSeconds: s.elapsedSeconds,
+    totalCostUsd: s.totalCostUsd,
+    isPausedAll: s.isPausedAll,
+  };
+}
+
+export const selectRunList = memo(
+  (s) => [
+    s.runs,
+    s.runOrder,
+    s.activeRunId,
+    s.calls,
+    s.callingStarted,
+    s.researchStatus,
+    s.researchMessage,
+    s.researchedCompanies,
+    s.plan,
+  ],
+  (s: AtlasState): RunSummary[] =>
+    s.runOrder
+      .map((id) => (id === s.activeRunId ? liveRun(s) : s.runs[id]))
+      .filter((r): r is ResearchRun => !!r)
+      .map(summarizeRun),
+);
+
+/** Count of runs actively researching or calling — sidebar badge. */
+export const selectActiveRunCount = (s: AtlasState): number =>
+  selectRunList(s).filter(
+    (r) => r.status === "researching" || r.status === "calling",
+  ).length;

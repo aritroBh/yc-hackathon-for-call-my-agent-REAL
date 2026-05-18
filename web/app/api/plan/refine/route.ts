@@ -69,7 +69,9 @@ export async function POST(req: Request) {
   try {
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      // Refinement stays on the fast Flash Lite draft model (same as
+      // /api/plan/generate) — deep research is the separate slow pass.
+      model: process.env.GEMINI_PLAN_MODEL || "gemini-3.1-flash-lite",
       contents: [
         {
           role: "user",
