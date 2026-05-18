@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { Sidebar } from "@/components/shared/sidebar";
-import { ChatDock } from "@/components/chat/chat-dock";
+import { ChatDockGate } from "@/components/chat/chat-dock-gate";
 import { ResearchRunner } from "@/components/shared/research-runner";
 
 export default async function AppLayout({
@@ -18,9 +18,10 @@ export default async function AppLayout({
       <main id="main" className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {children}
       </main>
-      <ChatDock />
-      {/* Invisible: owns the long deep-research SSE so it survives
-          navigation between app pages (see ResearchRunner). */}
+      {/* Dock is gated off on /settings and /research (main's
+          ChatDockGate); ResearchRunner still owns the long deep-research
+          SSE so it survives navigation between app pages. */}
+      <ChatDockGate />
       <ResearchRunner />
     </div>
   );

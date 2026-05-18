@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Home, Telescope, MessagesSquare, Settings, LogOut } from "lucide-react";
+import { Home, Telescope, Settings, LogOut } from "lucide-react";
 import { useAtlas } from "@/lib/store";
 import { selectActiveRunCount } from "@/lib/store/selectors";
 import { signOut } from "@/lib/auth/mock-auth";
@@ -11,7 +11,6 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { href: "/", label: "Home", icon: Home, badge: false },
   { href: "/research", label: "Research", icon: Telescope, badge: true },
-  { href: "/chat", label: "Chat", icon: MessagesSquare, badge: false },
   { href: "/settings", label: "Settings", icon: Settings, badge: false },
 ];
 
