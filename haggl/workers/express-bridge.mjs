@@ -448,7 +448,7 @@ twilioWss.on("connection", (ws, req) => {
   // Echo gate: suppress inbound for 800ms after the last audio chunk we sent.
   // Time-based, not flag-based — turnComplete is unreliable in the SDK.
   let lastGeminiAudioMs = 0;
-  const ECHO_GATE_MS = 800;
+  const ECHO_GATE_MS = 150;
 
   // Transcript buffers: Gemini streams word-by-word fragments.
   // Accumulate per turn, flush on sentence-end punctuation or 600ms silence.

@@ -5,9 +5,10 @@ const BRIDGE_URL =
   process.env.NEXT_PUBLIC_SOCKET_URL ||
   "http://localhost:3001";
 
-const LIVE_CALL_ID = "live-call";
-const LIVE_RFQ_ID = "live-rfq";
-const LIVE_SUPPLIER_ID = "live-supplier";
+// Match the seed IDs so real transcript feeds into the Kolkata row
+const LIVE_CALL_ID = "call_sup_kolkata";
+const LIVE_RFQ_ID = "rfq_sandals_global";
+const LIVE_SUPPLIER_ID = "sup_kolkata";
 
 // Called by store-hydrator when the "Start calling" button is clicked.
 // Fires the real Twilio outbound call via the bridge.

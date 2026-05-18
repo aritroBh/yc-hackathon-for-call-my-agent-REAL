@@ -27,6 +27,7 @@ function buildSchedule(): { atMs: number; build: (ts: string) => unknown }[] {
   const schedule: { atMs: number; build: (ts: string) => unknown }[] = [];
 
   seedCallOrder.forEach((callId, index) => {
+    if (callId === "call_sup_kolkata") return; // real call handles this row
     const call = seedCalls[callId];
     const supplier = seedSuppliers[call.supplier_id];
     const meta = supplier.metadata as Record<string, string>;
