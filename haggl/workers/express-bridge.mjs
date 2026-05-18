@@ -62,7 +62,7 @@ async function translateToEnglish(text) {
     const ai = getGeminiAI();
     const result = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: [{ role: "user", parts: [{ text: `You are a professional translator. Translate the following text into natural English. The input may be Bengali, Hindi, or a mix. Translate the MEANING into English — do NOT transliterate or write out the sounds in English letters. Return ONLY the English translation, nothing else:\n\n${text}` }] }],
+      contents: [{ role: "user", parts: [{ text: `Translate the following into natural, accurate English. Input is a live phone call transcript — may be Bengali, Hindi, or mixed. Rules:\n- Translate the MEANING, not the sounds\n- Keep it conversational and natural\n- Preserve numbers, prices, and proper nouns\n- Do NOT explain or add commentary\n- Return ONLY the English translation\n\nText:\n${text}` }] }],
     });
     // @google/genai v2: response.text is a getter; also try candidates path
     const translated =
@@ -401,12 +401,10 @@ twilioWss.on("connection", (ws, req) => {
   let streamSid = null;
   let geminiHandle = null;
   let closed = false;
-  // Echo gate: block inbound ONLY while Gemini is actively sending audio,
-  // plus a 300ms tail after turnComplete for speaker dissipation.
-  // Do NOT hold the gate open for seconds after turn ends — that drops supplier replies.
-  let geminiSpeaking = false;
-  let geminiDoneAt = 0;
-  const ECHO_TAIL_MS = 300;
+  // Echo gate: suppress inbound for 800ms after the last audio chunk we sent.
+  // Time-based, not flag-based — turnComplete is unreliable in the SDK.
+  let lastGeminiAudioMs = 0;
+  const ECHO_GATE_MS = 800;
 
   // Transcript buffers: Gemini streams word-by-word fragments.
   // Accumulate per turn, flush on sentence-end punctuation or 600ms silence.
@@ -463,7 +461,7 @@ twilioWss.on("connection", (ws, req) => {
             languageCode: langCode,
             onAudioOutput: (audioBuf) => {
               if (closed || !streamSid || ws.readyState !== 1) return;
-              geminiSpeaking = true;
+              lastGeminiAudioMs = Date.now();
               ws.send(JSON.stringify({
                 event: "media",
                 streamSid,
@@ -471,21 +469,19 @@ twilioWss.on("connection", (ws, req) => {
               }));
             },
             onTurnComplete: () => {
-              geminiSpeaking = false;
-              geminiDoneAt = Date.now();
               flushAgent();
             },
             onAgentFragment: (frag) => {
               agentBuf += frag;
               clearTimeout(agentTimer);
               if (/[।?.!\n]/.test(frag)) { flushAgent(); }
-              else { agentTimer = setTimeout(flushAgent, 600); }
+              else { agentTimer = setTimeout(flushAgent, 1200); }
             },
             onSupplierFragment: (frag) => {
               supplierBuf += frag;
               clearTimeout(supplierTimer);
               if (/[।?.!\n]/.test(frag)) { flushSupplier(); }
-              else { supplierTimer = setTimeout(flushSupplier, 600); }
+              else { supplierTimer = setTimeout(flushSupplier, 1200); }
             },
           });
           console.log(`[twilio-stream] Gemini Live session ready hcid=${hcid}`);
@@ -495,8 +491,7 @@ twilioWss.on("connection", (ws, req) => {
 
       } else if (frame.event === "media") {
         if (!geminiHandle) return;
-        // Suppress only while Gemini is actively speaking or within 300ms tail
-        if (geminiSpeaking || Date.now() - geminiDoneAt < ECHO_TAIL_MS) return;
+        if (Date.now() - lastGeminiAudioMs < ECHO_GATE_MS) return;
         const mulaw = Buffer.from(frame.media.payload, "base64");
         geminiHandle.sendAudio(mulaw);
 
