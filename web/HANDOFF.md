@@ -12,14 +12,18 @@ cd web && npm run dev      # http://localhost:3100
 
 ## 1. The big picture
 
-Atlas is **dashboard-forward**. A buyer chats with a planning agent, kicks off a
-batch of supplier calls, and watches deals land on a live ledger.
+Atlas is **dashboard-forward**. A buyer finishes onboarding, watches the agent
+draft a sourcing plan, reviews/refines it, kicks off a batch of supplier calls,
+and watches deals land on a live ledger.
 
-Three independent integration surfaces:
+Flow: `onboarding → /planning → /plan → dashboard` (see §6b).
+
+Independent integration surfaces:
 
 | Surface | What it is today (mock) | Where the backend connects |
 |---|---|---|
 | **Live call/deal data** | `setInterval` simulator | One reducer: `ingestEvent(LiveCallEvent)` |
+| **Sourcing plan** | Gemini via `/api/plan/generate` + `/api/plan/refine` (deterministic fallback) | Real; the **committed plan** needs a dispatch/persist endpoint (§6b) |
 | **Chat planning agent** | Gemini via `/api/chat` | Already real; needs grounding + actions |
 | **Auth + persistence** | cookie mock | `lib/auth/*`, onboarding + action endpoints |
 
@@ -107,7 +111,8 @@ These UI controls currently only drive local state. Wire each to your API:
 | **"Start calling N suppliers"** | `beginCampaign()` in [store/index.ts](lib/store/index.ts); buttons in `chat-panel.tsx` & `dashboard/_components/dashboard-view.tsx` | flips `callingStarted`, starts simulator | **POST to dispatch** → actually place the outbound voice calls (Vapi/Twilio batch). This is the real "go". |
 | **"Lock this deal" / "Lock deal"** | `best-offer-banner.tsx`, `ledger-row-detail.tsx` | no-op | endpoint to accept an offer → order creation, AgentMail confirmation, Sponge payout, etc. |
 | **"Pause all" / "Resume all"** | `togglePauseAll()` (Topbar) | pauses simulator clock | actually pause/cancel in-flight calls |
-| **Onboarding answers** | `onboarding-flow.tsx` (`OnboardingAnswers`) | local state; only sets an `onboarded` cookie via `markOnboarded()` | **persist + create the RFQ/campaign** (product, budget cap, units, regions, languages, priority). This is the input to dispatch. Not sent anywhere yet. |
+| **Onboarding answers** | `onboarding-flow.tsx` (`OnboardingAnswers`) | captured into the store (`onboardingAnswers`) and POSTed to `/api/plan/generate`; sets the `onboarded` cookie | **persist** the answers; they're now the input to plan generation (§6b), not yet to a real RFQ/campaign backend |
+| **Commit plan / "Start calling"** | `beginCampaign()` via `plan-canvas.tsx` & `plan-card.tsx` | flips `callingStarted`, starts simulator | **POST the committed `SourcingPlan`** to dispatch → create the RFQ/campaign + place the calls. The final `plan` (store) is the structured dispatch input. |
 | **Sign out** | `sidebar.tsx` → `signOut()` | clears mock cookies | Supabase sign-out |
 
 ---
@@ -148,6 +153,58 @@ Gemini via `@google/genai`.
 
 ---
 
+## 6b. Planning loader + plan review (`/planning`, `/plan`)
+
+Two beats sit between onboarding and the dashboard so the agent visibly
+"thinks" and the buyer approves intent before any real calls go out:
+
+```
+onboarding [Start sourcing]
+  → store.setOnboardingAnswers(answers); router.push("/planning")
+/planning   POST /api/plan/generate { answers }      → store.setPlan(plan)
+  → router.push("/plan")
+/plan       POST /api/plan/refine  { plan, message } → store.setPlan(plan)   (chips + free-form)
+  → [Start calling] beginCampaign(); router.push("/dashboard")
+```
+
+### Routes (already real, Gemini + always-valid fallback)
+- [`app/api/plan/generate/route.ts`](app/api/plan/generate/route.ts) — drafts a
+  `SourcingPlan` from `OnboardingAnswers`.
+- [`app/api/plan/refine/route.ts`](app/api/plan/refine/route.ts) — applies a
+  buyer instruction, returns `{ plan, reply }`.
+- Same `@google/genai` client + `GEMINI_API_KEY`/`GEMINI_MODEL` as `/api/chat`.
+  Both routes **always return a valid plan**: [`lib/plan/index.ts`](lib/plan/index.ts)
+  builds a deterministic plan from the answers and supplies the chip/refine
+  heuristics; it's the fallback when the key is missing or the model errors, so
+  the demo never breaks. Replace `lib/plan` region/supplier seed data with real
+  scraped/sourced suppliers when available.
+
+### Data shape
+`SourcingPlan` / `PlanSupplier` / `PlanBudget` are in
+[`lib/types.ts`](lib/types.ts) under the **UI-only view models** block (like
+`OnboardingAnswers`, `ChatMessage` — *not* copied from `haggl/types`). This is
+the contract between the two routes and the `/planning` + `/plan` screens; keep
+them in sync. **This is also the structured dispatch input** — the committed
+plan has the final supplier list, languages, budget guardrails and negotiation
+approach the calls should run with.
+
+### Store
+[`lib/store/index.ts`](lib/store/index.ts) gained `onboardingAnswers`, `plan`
+and setters `setOnboardingAnswers` / `setPlan` (cleared by `reset()`). They live
+in-memory and survive client-side navigation; a hard refresh on `/planning`
+(no answers) redirects to `/onboarding`, and `/plan` (no plan) to `/planning`.
+A real backend should persist these (Supabase) so the flow survives reloads.
+
+### Backend TODO
+1. **Commit endpoint:** on "Start calling" (`plan-canvas.tsx`/`plan-card.tsx` →
+   `beginCampaign()`), POST the final `store.plan` to create the RFQ/campaign and
+   dispatch the calls. This supersedes the loose onboarding-answers note in §4.
+2. Persist `onboardingAnswers` + `plan` (auth-scoped) instead of in-memory store.
+3. Optional: have `/api/plan/generate` ground supplier selection in your real
+   supplier directory rather than the `lib/plan` seed pools.
+
+---
+
 ## 7. State & selectors (how the dashboard reads data)
 
 - Store: [`web/lib/store/index.ts`](lib/store/index.ts) - collections keyed by id,
@@ -177,8 +234,11 @@ Gemini via `@google/genai`.
    telephony/agent events into `LiveCallEvent`, push them to
    `useAtlas.getState().ingestEvent(...)`, call `tick()` on a timer, flip the
    import in `store-hydrator.tsx`. Dashboard goes live with zero component changes.
-2. Add a dispatch endpoint and wire `beginCampaign()` + onboarding answers to it.
-3. Add "Lock deal" + "Pause all" endpoints.
-4. Swap the 3 auth files for Supabase.
-5. (Optional but high-value) Ground the Gemini agent in real state + give it
-   dispatch as a tool.
+2. Add a dispatch endpoint and wire `beginCampaign()` to POST the committed
+   `SourcingPlan` (§6b) — that plan, not the raw onboarding answers, is the input.
+3. Persist `onboardingAnswers` + `plan` (Supabase) so `/planning` and `/plan`
+   survive a reload.
+4. Add "Lock deal" + "Pause all" endpoints.
+5. Swap the 3 auth files for Supabase.
+6. (Optional but high-value) Ground the Gemini agent in real state + give it
+   dispatch as a tool; ground `/api/plan/generate` in your real supplier directory.

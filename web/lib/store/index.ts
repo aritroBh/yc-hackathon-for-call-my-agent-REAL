@@ -9,6 +9,8 @@ import type {
   ChatMessage,
   CallStatus,
   NegotiationPhase,
+  OnboardingAnswers,
+  SourcingPlan,
 } from "@/lib/types";
 import {
   seedRfq,
@@ -40,6 +42,12 @@ export interface AtlasState {
 
   chat: ChatSlice;
 
+  /** Onboarding answers, captured at "Start sourcing" and read by
+   *  `/planning` to draft the plan. Survives client-side navigation. */
+  onboardingAnswers: OnboardingAnswers | null;
+  /** The drafted/refined sourcing plan reviewed on `/plan`. */
+  plan: SourcingPlan | null;
+
   /** The single live-data entry point. Mock simulator AND a real
    *  Vapi/WebSocket bridge both call this - nothing else mutates calls. */
   ingestEvent: (e: LiveCallEvent) => void;
@@ -54,6 +62,9 @@ export interface AtlasState {
   setChatExpanded: (expanded: boolean) => void;
   pushChatMessage: (m: ChatMessage) => void;
   setAgentTyping: (typing: boolean) => void;
+
+  setOnboardingAnswers: (a: OnboardingAnswers) => void;
+  setPlan: (p: SourcingPlan | null) => void;
 
   reset: () => void;
 }
@@ -87,6 +98,9 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   callingStarted: false,
 
   chat: { expanded: false, messages: seedChat, unread: 0, agentTyping: false },
+
+  onboardingAnswers: null,
+  plan: null,
 
   ingestEvent: (e: LiveCallEvent) => {
     const state = get();
@@ -322,6 +336,9 @@ export const useAtlas = create<AtlasState>((set, get) => ({
   setAgentTyping: (agentTyping) =>
     set((s) => ({ chat: { ...s.chat, agentTyping } })),
 
+  setOnboardingAnswers: (onboardingAnswers) => set({ onboardingAnswers }),
+  setPlan: (plan) => set({ plan }),
+
   reset: () =>
     set({
       rfq: seedRfq,
@@ -335,5 +352,7 @@ export const useAtlas = create<AtlasState>((set, get) => ({
       magicMomentActive: false,
       callingStarted: false,
       chat: { expanded: false, messages: seedChat, unread: 0, agentTyping: false },
+      onboardingAnswers: null,
+      plan: null,
     }),
 }));

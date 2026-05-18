@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { ArrowRight, ArrowLeft } from "lucide-react";
 import type { OnboardingAnswers } from "@/lib/types";
 import { markOnboarded } from "@/lib/auth/mock-auth";
+import { useAtlas } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { ProgressBar } from "./progress-bar";
 import { STEPS } from "./onboarding-steps";
@@ -37,8 +38,9 @@ export function OnboardingFlow() {
   function next() {
     if (!canAdvance) return;
     if (isLast) {
+      useAtlas.getState().setOnboardingAnswers(answers);
       markOnboarded();
-      router.push("/dashboard");
+      router.push("/planning");
       return;
     }
     setIndex((i) => i + 1);
