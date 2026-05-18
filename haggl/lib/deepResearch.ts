@@ -1,3 +1,5 @@
+import { GoogleGenAI } from "@google/genai"
+
 /**
  * Gemini Deep Research integration.
  * Uses the Interactions API (v1beta) with agent deep-research-preview-04-2026.
@@ -249,4 +251,90 @@ export function parseSuppliers(report: string): DiscoveredSupplier[] {
   if (current?.name) suppliers.push(current as DiscoveredSupplier)
 
   return suppliers.slice(0, 4).filter(s => s.name && s.name.length > 2)
+}
+
+/**
+ * ─────────────────────────────────────────────────────────────────────
+ * COMPETITION SHORTCUT — "Deep Research" WITHOUT the Deep Research API.
+ * ─────────────────────────────────────────────────────────────────────
+ * WHY: the real Deep Research agent above (startResearchWithPlan +
+ * approveAndExecuteResearch) is the production-grade path, but it takes
+ * ~3–13 minutes end to end — the collaborative-planning poll caps at 3
+ * min and the execution poll at 10 min. For a live hackathon demo where
+ * a judge is watching the run happen, minutes of spinner is a dealbreaker.
+ *
+ * So for the demo we deliberately DO NOT call the Deep Research
+ * Interactions API. Instead we ask **Gemini 3.1 Flash with the Google
+ * Search grounding tool** to do a fast, single-shot supplier
+ * investigation and emit the SAME report shape (a ```json block of
+ * suppliers) that `parseSuppliers()` already consumes. Result: seconds
+ * instead of minutes, with an identical SSE contract and identical
+ * `DiscoveredSupplier[]` output — zero UI/mock changes downstream.
+ *
+ * The real path is intentionally left intact above; flip the call site
+ * in app/api/research/route.ts (action "research") back to
+ * startResearchWithPlan/approveAndExecuteResearch for production depth.
+ */
+// "gemini-3.1-flash" isn't enabled for this project's key (404 on v1beta);
+// the repo's configured GEMINI_MODEL is gemini-3.1-flash-lite (the 3.1
+// Flash family that IS available here), which supports googleSearch
+// grounding + generateContent. Override with GEMINI_RESEARCH_MODEL.
+const RESEARCH_MODEL =
+  process.env.GEMINI_RESEARCH_MODEL ||
+  process.env.GEMINI_MODEL ||
+  "gemini-3.1-flash-lite"
+
+export async function fastResearch(
+  rfqTitle: string,
+  rfqDescription: string,
+  items: string,
+): Promise<string> {
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY })
+
+  const prompt = `You are a procurement research specialist with live web access.
+A US buyer needs to source the following:
+
+RFQ TITLE: ${rfqTitle}
+DESCRIPTION: ${rfqDescription}
+ITEMS: ${items}
+
+Use web search to find 2 to 4 REAL, verifiable suppliers who can fulfil this procurement.
+Focus specifically on:
+1. West African suppliers (Ghana preferred, Twi/Akan speaking) — textile, agricultural, manufactured goods
+2. Indian suppliers (Hindi speaking, North India preferred) — textile, manufacturing, export
+
+For each supplier find: company name, country, region/city, specialization, a website or
+LinkedIn if available, and why they are a fit for this RFQ.
+
+End your answer with ONLY this JSON array (no prose after it), in EXACTLY this format:
+\`\`\`json
+[
+  {
+    "name": "Company Name",
+    "country": "Ghana",
+    "region": "Accra",
+    "specialization": "Kente cloth export",
+    "website": "example.com",
+    "notes": "AGOA certified, GSA mark, 10+ years export experience"
+  }
+]
+\`\`\``
+
+  const res = await ai.models.generateContent({
+    model: RESEARCH_MODEL,
+    contents: prompt,
+    config: {
+      temperature: 0.4,
+      maxOutputTokens: 2048,
+      // Google Search grounding — this is what lets Flash "research"
+      // real companies fast, standing in for the Deep Research agent.
+      tools: [{ googleSearch: {} }],
+    },
+  })
+
+  const report = res.text ?? ""
+  if (!report.trim()) {
+    throw new Error("Fast research returned an empty report")
+  }
+  return report
 }

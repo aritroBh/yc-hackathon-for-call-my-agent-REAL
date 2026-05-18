@@ -2,23 +2,23 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { RadioTower, MessagesSquare, History, Settings, LogOut } from "lucide-react";
+import { Home, Telescope, MessagesSquare, Settings, LogOut } from "lucide-react";
 import { useAtlas } from "@/lib/store";
-import { selectKpis } from "@/lib/store/selectors";
+import { selectActiveRunCount } from "@/lib/store/selectors";
 import { signOut } from "@/lib/auth/mock-auth";
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { href: "/dashboard", label: "Active Negotiations", icon: RadioTower, badge: true },
+  { href: "/", label: "Home", icon: Home, badge: false },
+  { href: "/research", label: "Research", icon: Telescope, badge: true },
   { href: "/chat", label: "Chat", icon: MessagesSquare, badge: false },
-  { href: "/history", label: "History", icon: History, badge: false },
   { href: "/settings", label: "Settings", icon: Settings, badge: false },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const inProgress = useAtlas((s) => selectKpis(s).inProgress);
+  const activeCount = useAtlas(selectActiveRunCount);
 
   function handleSignOut() {
     signOut();
@@ -32,7 +32,7 @@ export function Sidebar() {
       className="flex h-full w-[244px] shrink-0 flex-col border-r border-border bg-surface-2 p-5"
     >
       <Link
-        href="/dashboard"
+        href="/"
         className="mb-5 flex items-center gap-2 px-2 py-1.5"
       >
         <span className="font-display text-2xl font-semibold tracking-tight text-ink">
@@ -60,9 +60,9 @@ export function Sidebar() {
               >
                 <Icon className="size-[17px] shrink-0" strokeWidth={2} />
                 <span className="flex-1 truncate">{item.label}</span>
-                {item.badge && inProgress > 0 && (
+                {item.badge && activeCount > 0 && (
                   <span className="rounded-full bg-clay px-1.5 py-0.5 font-mono text-[11px] font-semibold tabular text-white">
-                    {inProgress}
+                    {activeCount}
                   </span>
                 )}
               </Link>
@@ -78,9 +78,6 @@ export function Sidebar() {
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-[13px] font-semibold text-ink">
             Marcus Allen
-          </span>
-          <span className="font-mono text-[11px] tabular text-ink-3">
-            Pro · 2,400 min
           </span>
         </span>
         <button

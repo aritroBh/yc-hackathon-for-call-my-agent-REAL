@@ -10,6 +10,7 @@ import type {
   SourcingPlan,
   PlanSupplier,
   Language,
+  ResearchedSupplier,
 } from "@/lib/types";
 
 export const PRIORITY_LABEL: Record<OnboardingAnswers["priority"], string> = {
@@ -245,4 +246,57 @@ function negotiationBulletsFrom(
     `Require GOTS / ISO certification before closing.`,
     `Hold $${cap.toFixed(2)}/unit as a hard ceiling — pause and check in if exceeded.`,
   ];
+}
+
+/* ── Phase 2: real suppliers from Gemini Deep Research ──────────────
+ * `ResearchedSupplier` is the canonical dossier shape — see
+ * `@/lib/types`. These map it down to the lean `PlanSupplier` the
+ * card renders; the full dossier is kept in the store for the
+ * dashboard's per-company context view. */
+function codeFor(country: string): string {
+  const c = (country || "").toLowerCase();
+  if (c.includes("ghana")) return "GH";
+  if (c.includes("nigeria")) return "NG";
+  if (c.includes("india")) return "IN";
+  return (country || "—").trim().slice(0, 2).toUpperCase() || "—";
+}
+
+function normLanguage(raw: string): Language {
+  const l = (raw || "").toLowerCase();
+  if (l.includes("yoruba")) return "Yoruba";
+  if (l.includes("twi") || l.includes("akan")) return "Twi";
+  if (l.includes("hindi")) return "Hindi";
+  return "English";
+}
+
+/**
+ * Swap the plan's seeded suppliers for the ones Gemini Deep Research
+ * discovered (via haggl `/api/research`), then re-derive summary,
+ * duration, regions and call-strategy so the card stays consistent.
+ * Returns the plan unchanged if nothing usable came back.
+ */
+export function applyResearchedSuppliers(
+  plan: SourcingPlan,
+  researched: ResearchedSupplier[],
+): SourcingPlan {
+  const suppliers: PlanSupplier[] = (researched ?? [])
+    .filter((s) => s && typeof s.name === "string" && s.name.trim().length > 1)
+    .slice(0, 9)
+    .map((s) => ({
+      name: s.name.trim(),
+      city: (s.region || s.country || "—").trim(),
+      countryCode: codeFor(s.country),
+      country: (s.country || "—").trim(),
+      language: normLanguage(s.language),
+    }));
+
+  if (suppliers.length === 0) return plan;
+
+  const regions = Array.from(new Set(suppliers.map((s) => s.country)));
+  const next = recompute({ ...plan, suppliers, regions });
+  next.callStrategy = {
+    ...next.callStrategy,
+    order: regions.join(" → "),
+  };
+  return next;
 }

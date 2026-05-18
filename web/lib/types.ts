@@ -215,6 +215,23 @@ export interface PlanBudget {
   estSpend: number;
 }
 
+/**
+ * One company enriched by Gemini Deep Research (haggl `/api/research`,
+ * `suppliers_found` event — `DiscoveredSupplier` on that side). Held
+ * alongside the plan as the per-call **context dossier** the voice
+ * agent will use; `PlanSupplier` stays the lean shape the rest of the
+ * UI renders. Kept loose because `web/` never imports from `haggl/`.
+ */
+export interface ResearchedSupplier {
+  name: string;
+  country: string;
+  region: string;
+  language: string;
+  phone?: string;
+  specialization?: string;
+  notes?: string;
+}
+
 export interface SourcingPlan {
   /** Lowercased noun phrase, e.g. "leather sandals". */
   productLabel: string;
@@ -229,4 +246,39 @@ export interface SourcingPlan {
   negotiation: string[];
   /** Human label for the chosen onboarding priority. */
   priorityLabel: string;
+}
+
+/**
+ * One end-to-end run: a sourcing plan → Gemini Deep Research → a
+ * campaign of agent calls. The store keeps a registry of these
+ * (`runs`/`runOrder`) and mirrors exactly one (`activeRunId`) into the
+ * live top-level fields the dashboard selectors read. A run snapshot is
+ * everything needed to re-hydrate that live view later.
+ */
+export interface ResearchRun {
+  id: string;
+  title: string;
+  createdAt: string;
+  /** Seeded, always-available sample run for live demos. Never reset away. */
+  isDemo?: boolean;
+
+  plan: SourcingPlan | null;
+
+  /** Deep-research lifecycle for THIS run (mirrors the old single-run fields). */
+  research: {
+    status: "idle" | "running" | "done" | "error";
+    message: string | null;
+    companies: ResearchedSupplier[];
+  };
+
+  /** Per-run campaign snapshot — the "call investigation" view. */
+  rfq: RFQ | null;
+  suppliers: Record<string, Supplier>;
+  calls: Record<string, NegotiationCall>;
+  callOrder: string[];
+  callingStarted: boolean;
+  campaignStartedAt: string | null;
+  elapsedSeconds: number;
+  totalCostUsd: number;
+  isPausedAll: boolean;
 }

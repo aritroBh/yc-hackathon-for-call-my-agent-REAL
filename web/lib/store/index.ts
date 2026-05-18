@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 import type {
   RFQ,
   Supplier,
@@ -11,6 +12,8 @@ import type {
   NegotiationPhase,
   OnboardingAnswers,
   SourcingPlan,
+  ResearchedSupplier,
+  ResearchRun,
 } from "@/lib/types";
 import {
   seedRfq,
@@ -18,6 +21,9 @@ import {
   seedCalls,
   seedCallOrder,
   seedChat,
+  buildSeedRuns,
+  blankSeedCampaign,
+  DEMO_RUN_ID,
 } from "@/lib/data/seed";
 
 interface ChatSlice {
@@ -47,6 +53,23 @@ export interface AtlasState {
   onboardingAnswers: OnboardingAnswers | null;
   /** The drafted/refined sourcing plan reviewed on `/plan`. */
   plan: SourcingPlan | null;
+  /** Phase-2 Gemini Deep Research lifecycle. Set to "running" on plan
+   *  commit; the (app)-level ResearchRunner drives it to "done"/"error".
+   *  The dashboard "Ready" state renders off this. */
+  researchStatus: "idle" | "running" | "done" | "error";
+  /** Live status line from the deep-research SSE (haggl `status` events),
+   *  e.g. "Parsing supplier prospects…". Shown on the dashboard. */
+  researchMessage: string | null;
+  /** Full per-company dossiers from research — the per-call context the
+   *  dashboard surfaces and (next step) the voice agent will use. */
+  researchedCompanies: ResearchedSupplier[];
+
+  /** Registry of all runs (research → calls). The fields above are the
+   *  LIVE working copy of `activeRunId`; everything else lives here as a
+   *  snapshot. Selectors keep reading the live fields unchanged. */
+  runs: Record<string, ResearchRun>;
+  runOrder: string[];
+  activeRunId: string | null;
 
   /** The single live-data entry point. Mock simulator AND a real
    *  Vapi/WebSocket bridge both call this - nothing else mutates calls. */
@@ -65,11 +88,54 @@ export interface AtlasState {
 
   setOnboardingAnswers: (a: OnboardingAnswers) => void;
   setPlan: (p: SourcingPlan | null) => void;
+  setResearchStatus: (s: AtlasState["researchStatus"]) => void;
+  setResearchMessage: (m: string | null) => void;
+  setResearchedCompanies: (c: ResearchedSupplier[]) => void;
+
+  /** Write the live working fields back into `runs[activeRunId]`. Called
+   *  before switching runs and on run-page unmount. */
+  snapshotActiveRun: () => void;
+  /** Snapshot the current run, then mirror `runs[id]` into the live
+   *  fields and make it active. */
+  loadRun: (id: string) => void;
+  /** Create a new run from a plan (research starting), make it active,
+   *  return its id. */
+  createRun: (plan: SourcingPlan | null, title?: string) => string;
+  /** Update a run's research slice by id (mirrors to live if active).
+   *  Safe for a backgrounded run the user has navigated away from. */
+  patchRunResearch: (
+    runId: string,
+    patch: Partial<ResearchRun["research"]>,
+  ) => void;
+  /** Set a run's plan by id (mirrors to live if active). */
+  setRunPlan: (runId: string, plan: SourcingPlan | null) => void;
 
   reset: () => void;
 }
 
 const COST_PER_CALL_MINUTE = 0.18;
+
+const SEED_RUNS = buildSeedRuns();
+
+/** Fields that are mirrored between the live store and a run snapshot. */
+function liveFieldsFrom(r: ResearchRun) {
+  return {
+    rfq: r.rfq,
+    suppliers: r.suppliers,
+    calls: r.calls,
+    callOrder: r.callOrder,
+    callingStarted: r.callingStarted,
+    campaignStartedAt: r.campaignStartedAt,
+    elapsedSeconds: r.elapsedSeconds,
+    totalCostUsd: r.totalCostUsd,
+    isPausedAll: r.isPausedAll,
+    magicMomentActive: false,
+    plan: r.plan,
+    researchStatus: r.research.status,
+    researchMessage: r.research.message,
+    researchedCompanies: r.research.companies,
+  };
+}
 
 function patchCall(
   state: AtlasState,
@@ -84,7 +150,9 @@ function patchCall(
   };
 }
 
-export const useAtlas = create<AtlasState>((set, get) => ({
+export const useAtlas = create<AtlasState>()(
+  persist(
+    (set, get) => ({
   rfq: seedRfq,
   suppliers: seedSuppliers,
   calls: seedCalls,
@@ -101,6 +169,13 @@ export const useAtlas = create<AtlasState>((set, get) => ({
 
   onboardingAnswers: null,
   plan: null,
+  researchStatus: "idle",
+  researchMessage: null,
+  researchedCompanies: [],
+
+  runs: SEED_RUNS.runs,
+  runOrder: SEED_RUNS.runOrder,
+  activeRunId: DEMO_RUN_ID,
 
   ingestEvent: (e: LiveCallEvent) => {
     const state = get();
@@ -338,21 +413,162 @@ export const useAtlas = create<AtlasState>((set, get) => ({
 
   setOnboardingAnswers: (onboardingAnswers) => set({ onboardingAnswers }),
   setPlan: (plan) => set({ plan }),
+  setResearchStatus: (researchStatus) => set({ researchStatus }),
+  setResearchMessage: (researchMessage) => set({ researchMessage }),
+  setResearchedCompanies: (researchedCompanies) => set({ researchedCompanies }),
 
-  reset: () =>
+  snapshotActiveRun: () => {
+    const s = get();
+    const id = s.activeRunId;
+    const prev = id ? s.runs[id] : undefined;
+    if (!id || !prev) return;
     set({
-      rfq: seedRfq,
-      suppliers: seedSuppliers,
-      calls: seedCalls,
-      callOrder: seedCallOrder,
+      runs: {
+        ...s.runs,
+        [id]: {
+          ...prev,
+          rfq: s.rfq,
+          suppliers: s.suppliers,
+          calls: s.calls,
+          callOrder: s.callOrder,
+          callingStarted: s.callingStarted,
+          campaignStartedAt: s.campaignStartedAt,
+          elapsedSeconds: s.elapsedSeconds,
+          totalCostUsd: s.totalCostUsd,
+          isPausedAll: s.isPausedAll,
+          plan: s.plan,
+          research: {
+            status: s.researchStatus,
+            message: s.researchMessage,
+            companies: s.researchedCompanies,
+          },
+        },
+      },
+    });
+  },
+
+  loadRun: (id) => {
+    const s = get();
+    const r = s.runs[id];
+    if (!r) return;
+    if (id === s.activeRunId) return;
+    get().snapshotActiveRun();
+    set({ activeRunId: id, ...liveFieldsFrom(get().runs[id] ?? r) });
+  },
+
+  createRun: (plan, title) => {
+    get().snapshotActiveRun();
+    const id = `run_${Date.now().toString(36)}`;
+    const label =
+      title ||
+      (plan
+        ? plan.productLabel.charAt(0).toUpperCase() + plan.productLabel.slice(1)
+        : "New sourcing run");
+    const run: ResearchRun = {
+      id,
+      title: label,
+      createdAt: new Date().toISOString(),
+      plan: plan ?? null,
+      research: { status: "running", message: null, companies: [] },
+      ...blankSeedCampaign(),
+      callingStarted: false,
       campaignStartedAt: null,
       elapsedSeconds: 0,
       totalCostUsd: 0,
       isPausedAll: false,
-      magicMomentActive: false,
+    };
+    set((st) => ({
+      runs: { ...st.runs, [id]: run },
+      runOrder: [id, ...st.runOrder],
+      activeRunId: id,
+      ...liveFieldsFrom(run),
+    }));
+    return id;
+  },
+
+  patchRunResearch: (runId, patch) =>
+    set((s) => {
+      const r = s.runs[runId];
+      if (!r) return {};
+      const research = { ...r.research, ...patch };
+      const mirror =
+        s.activeRunId === runId
+          ? {
+              researchStatus: research.status,
+              researchMessage: research.message,
+              researchedCompanies: research.companies,
+            }
+          : {};
+      return {
+        runs: { ...s.runs, [runId]: { ...r, research } },
+        ...mirror,
+      };
+    }),
+
+  setRunPlan: (runId, plan) =>
+    set((s) => {
+      const r = s.runs[runId];
+      if (!r) return {};
+      return {
+        runs: { ...s.runs, [runId]: { ...r, plan } },
+        ...(s.activeRunId === runId ? { plan } : {}),
+      };
+    }),
+
+  reset: () => {
+    const seeded = buildSeedRuns();
+    set({
+      ...liveFieldsFrom(seeded.runs[DEMO_RUN_ID]),
       callingStarted: false,
       chat: { expanded: false, messages: seedChat, unread: 0, agentTyping: false },
       onboardingAnswers: null,
-      plan: null,
+      runs: seeded.runs,
+      runOrder: seeded.runOrder,
+      activeRunId: DEMO_RUN_ID,
+    });
+  },
     }),
-}));
+    {
+      // Persist research to BROWSER STORAGE for now (no backend DB):
+      // research dossiers live inside `runs` (patchRunResearch writes
+      // there), so persisting the run registry survives reloads. Live
+      // mirror / chat / simulator state is intentionally NOT persisted —
+      // it's re-derived from the active run on rehydrate.
+      name: "haggl-store",
+      version: 1,
+      storage: createJSONStorage(() =>
+        typeof window !== "undefined"
+          ? window.localStorage
+          : (undefined as unknown as Storage),
+      ),
+      partialize: (s) => ({
+        runs: s.runs,
+        runOrder: s.runOrder,
+        activeRunId: s.activeRunId,
+        onboardingAnswers: s.onboardingAnswers,
+      }),
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<AtlasState>;
+        const seeded = buildSeedRuns();
+        // Seed runs (demo + history) are ALWAYS present; persisted user
+        // runs win on id collision and keep their saved research.
+        const runs = { ...seeded.runs, ...(p.runs ?? {}) };
+        const order: string[] = [];
+        for (const id of p.runOrder ?? [])
+          if (runs[id] && !order.includes(id)) order.push(id);
+        for (const id of seeded.runOrder)
+          if (!order.includes(id)) order.push(id);
+        const activeRunId =
+          p.activeRunId && runs[p.activeRunId] ? p.activeRunId : DEMO_RUN_ID;
+        return {
+          ...current,
+          runs,
+          runOrder: order,
+          activeRunId,
+          onboardingAnswers: p.onboardingAnswers ?? current.onboardingAnswers,
+          ...liveFieldsFrom(runs[activeRunId]),
+        };
+      },
+    },
+  ),
+);

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { Sidebar } from "@/components/shared/sidebar";
 import { ChatDock } from "@/components/chat/chat-dock";
+import { ResearchRunner } from "@/components/shared/research-runner";
 
 export default async function AppLayout({
   children,
@@ -18,6 +19,9 @@ export default async function AppLayout({
         {children}
       </main>
       <ChatDock />
+      {/* Invisible: owns the long deep-research SSE so it survives
+          navigation between app pages (see ResearchRunner). */}
+      <ResearchRunner />
     </div>
   );
 }

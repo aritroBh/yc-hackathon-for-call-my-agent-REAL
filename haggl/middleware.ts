@@ -10,6 +10,10 @@ export const PUBLIC_ROUTES = [
   "/api/vapi",
   // Demo data seeder (POC testing).
   "/api/demo",
+  // Gemini Deep Research — called server-to-server by the standalone
+  // `web/` frontend (the sole UI). haggl runs headless; this endpoint
+  // is the supplier-discovery entry point for the sourcing plan.
+  "/api/research",
   "/_next",
   "/favicon.ico",
   "/login",
