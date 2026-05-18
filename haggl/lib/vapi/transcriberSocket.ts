@@ -31,6 +31,14 @@ import type { Server as HttpServer } from "http";
 import * as fs from "fs";
 import { khayaTranscribe } from "../khaya";
 import { encodeWav, deinterleaveStereoChannel, rmsEnergy } from "../audio/wav";
+import { openGeminiSession, type GeminiHandle } from "../../../src/services/gemini/liveSession";
+import {
+  initGeminiCallState,
+  pushGeminiAudio,
+  pushGeminiText,
+  closeGeminiCallState,
+} from "./geminiCallState";
+import { getSupplierMemory } from "../sponsors/supermemory";
 
 const WS_PATH = "/vapi/transcriber";
 
@@ -261,6 +269,44 @@ function handleBinary(s: Session, chunk: Buffer, ws: WebSocket): void {
   }
 }
 
+// ── Gemini Live helpers ────────────────────────────────────────────────────
+
+function isGeminiLiveLanguage(lang: string): boolean {
+  return ["hindi", "bengali", "english", "hi", "bn", "en"].includes(lang.toLowerCase());
+}
+
+function langToCode(lang: string): string {
+  const l = lang.toLowerCase();
+  if (l === "bengali" || l === "bn") return "bn-IN";
+  if (l === "hindi" || l === "hi") return "hi-IN";
+  return "en-US";
+}
+
+function buildGeminiSystemPrompt(lang: string): string {
+  const langName =
+    lang.toLowerCase().startsWith("bn") || lang.toLowerCase() === "bengali"
+      ? "Bengali"
+      : lang.toLowerCase().startsWith("hi") || lang.toLowerCase() === "hindi"
+      ? "Hindi"
+      : "English";
+  return `You are an AI procurement negotiation agent communicating in ${langName}.
+
+MANDATORY RULES:
+1. Begin every call: "This is an AI-powered assistant calling on behalf of our procurement team. This call may be recorded."
+2. Never reveal your floor price, maximum budget, or internal pricing limits.
+3. Keep the call under 8 minutes.
+4. Be professional, polite, and persistent.
+5. If asked whether you are AI, confirm honestly.
+6. When you receive a [PROCUREMENT INTEL] message, use it silently to inform your next response — do NOT read it aloud.
+
+STRATEGY:
+1. Greet warmly with the AI disclosure.
+2. Explain the procurement requirement.
+3. Ask for their best price and terms.
+4. Negotiate respectfully toward target price.
+5. Summarise agreed terms and close.`;
+}
+
 /**
  * Attach the custom-transcriber WS to an existing http.Server. Uses a
  * noServer WebSocketServer and a path-filtered upgrade listener so it
@@ -280,34 +326,125 @@ export function attachVapiTranscriber(httpServer: HttpServer): void {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
   });
 
-  wss.on("connection", (ws: WebSocket) => {
-    const session = newSession();
-    console.log(`[vapi-transcriber] connection opened${DIAG ? " (DIAG)" : ""}`);
+  wss.on("connection", (ws: WebSocket, req: any) => {
+    // ── Parse URL params ────────────────────────────────────────────────
+    let callId = "";
+    let lang = "";
+    let supplierName = "";
+    let region = "";
+    try {
+      const url = new URL(req?.url || "", "http://localhost");
+      callId = url.searchParams.get("hcid") || "";
+      lang = url.searchParams.get("lang") || "";
+      supplierName = url.searchParams.get("supplier") || "";
+      region = url.searchParams.get("region") || "";
+    } catch { /* noop */ }
 
-    // Keepalive — ngrok free / Vapi will idle-close an otherwise quiet socket
-    // between turns, which is what truncated calls to a single turn.
+    const useGeminiLive = isGeminiLiveLanguage(lang) && !!callId;
+
+    console.log(
+      `[vapi-transcriber] connection opened${DIAG ? " (DIAG)" : ""} ` +
+        `[${useGeminiLive ? "gemini-live" : "khaya"}] hcid=${callId || "?"} lang=${lang || "?"}`
+    );
+
+    // ── Keepalive (both paths) ──────────────────────────────────────────
     let alive = true;
-    ws.on("pong", () => {
-      alive = true;
-    });
+    ws.on("pong", () => { alive = true; });
     const keepalive = setInterval(() => {
       if (ws.readyState !== ws.OPEN) return;
       if (!alive) {
         console.warn("[vapi-transcriber] no pong — terminating stale socket");
-        try {
-          ws.terminate();
-        } catch {
-          /* noop */
-        }
+        try { ws.terminate(); } catch { /* noop */ }
         return;
       }
       alive = false;
-      try {
-        ws.ping();
-      } catch {
-        /* noop */
-      }
+      try { ws.ping(); } catch { /* noop */ }
     }, KEEPALIVE_MS);
+
+    // ── Gemini Live path ────────────────────────────────────────────────
+    if (useGeminiLive) {
+      initGeminiCallState(callId);
+
+      let handle: GeminiHandle | null = null;
+      const earlyAudio: Buffer[] = [];
+      const langCode = langToCode(lang);
+      const systemPrompt = buildGeminiSystemPrompt(lang);
+
+      openGeminiSession(systemPrompt, {
+        languageCode: langCode,
+        onAudioOutput: (mulawBuf) => pushGeminiAudio(callId, mulawBuf),
+        onAgentTranscript: (text) => pushGeminiText(callId, text),
+        onSupplierTranscript: (text) => {
+          // Forward transcript to Vapi as transcriber-response
+          if (ws.readyState === ws.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: "transcriber-response",
+                transcription: text,
+                channel: "customer",
+                transcriptType: "final",
+              })
+            );
+          }
+          // Semantic memory lookup — inject context into Gemini if found
+          if (supplierName && handle) {
+            const h = handle;
+            getSupplierMemory(supplierName, region).then((memory) => {
+              if (memory) h.sendText(`[PROCUREMENT INTEL] ${memory.slice(0, 600)}`);
+            }).catch(() => { /* fail silently */ });
+          }
+        },
+        onError: (err) => console.error("[gemini-live] session error:", err.message),
+        onClose: () => console.log("[gemini-live] session closed"),
+      }).then((h) => {
+        handle = h;
+        // Drain buffered early audio
+        for (const buf of earlyAudio) h.sendPCM16k(buf);
+        earlyAudio.length = 0;
+        // Pre-fetch supplier memory at session start
+        if (supplierName) {
+          getSupplierMemory(supplierName, region).then((memory) => {
+            if (memory) h.sendText(`[PROCUREMENT INTEL] ${memory.slice(0, 800)}`);
+          }).catch(() => { /* fail silently */ });
+        }
+      }).catch((err) => {
+        console.error("[gemini-live] failed to open session:", err.message);
+        closeGeminiCallState(callId);
+      });
+
+      ws.on("message", (data: Buffer, isBinary: boolean) => {
+        if (!isBinary) return; // JSON control frames — ignore for Gemini Live
+        try {
+          const usable = Math.floor(data.length / 4) * 4;
+          if (usable === 0) return;
+          const ch0 = deinterleaveStereoChannel(data.subarray(0, usable), 0);
+          if (handle) {
+            handle.sendPCM16k(ch0);
+          } else {
+            earlyAudio.push(ch0);
+          }
+        } catch (err: any) {
+          console.error("[gemini-live] audio forward error:", err?.message);
+        }
+      });
+
+      ws.on("close", (code: number, reason: Buffer) => {
+        clearInterval(keepalive);
+        handle?.close();
+        closeGeminiCallState(callId);
+        console.log(
+          `[gemini-live] WS closed code=${code} reason="${reason?.toString() || ""}"`
+        );
+      });
+      ws.on("error", (err: any) => {
+        console.error("[gemini-live] ws error:", err?.message);
+      });
+
+      return; // Don't fall through to Khaya path
+    }
+
+    // ── Khaya path (West African languages) ────────────────────────────
+    const session = newSession();
 
     ws.on("message", (data: Buffer, isBinary: boolean) => {
       try {

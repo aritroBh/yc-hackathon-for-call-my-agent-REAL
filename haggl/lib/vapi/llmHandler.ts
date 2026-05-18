@@ -10,6 +10,27 @@
  * deltas as OpenAI `chat.completion.chunk` SSE.
  */
 import { runNegotiationTurn } from "@/lib/negotiation/core";
+import http from "http";
+
+const BRIDGE_PORT = process.env.SERVER_PORT || process.env.PORT || "3001";
+
+async function fetchGeminiText(callId: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const req = http.get(
+      `http://localhost:${BRIDGE_PORT}/gemini-text/${encodeURIComponent(callId)}`,
+      (res) => {
+        let body = "";
+        res.on("data", (chunk) => { body += chunk; });
+        res.on("end", () => {
+          try { resolve(JSON.parse(body)?.text || null); }
+          catch { resolve(null); }
+        });
+      }
+    );
+    req.on("error", () => resolve(null));
+    req.setTimeout(3500, () => { req.destroy(); resolve(null); });
+  });
+}
 
 interface OpenAIMessage {
   role: string;
@@ -38,7 +59,7 @@ export async function handleVapiLlm(req: Request, hagglCallIdHint: string): Prom
   const model =
     typeof body?.model === "string"
       ? body.model
-      : process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
+      : process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
   // Defensive: strip any trailing `/chat/completions` Vapi may have appended
   // (covers the legacy query-string route too).
@@ -76,6 +97,18 @@ export async function handleVapiLlm(req: Request, hagglCallIdHint: string): Prom
       let agentText = "";
       try {
         controller.enqueue(encoder.encode(sseChunk(model, { role: "assistant" }, null)));
+
+        // For Gemini Live calls: serve cached text from bridge instead of a new LLM call
+        if (hagglCallId) {
+          const cachedText = await fetchGeminiText(hagglCallId);
+          if (cachedText) {
+            controller.enqueue(encoder.encode(sseChunk(model, { content: cachedText }, null)));
+            controller.enqueue(encoder.encode(sseChunk(model, {}, "stop")));
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            console.log(`[vapi-llm] gemini-live cache hit: "${cachedText.slice(0, 60)}"`);
+            return;
+          }
+        }
 
         let produced = false;
         for await (const ev of runNegotiationTurn({ hagglCallId, supplierText, history })) {

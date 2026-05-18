@@ -6,26 +6,36 @@ interface Beat {
   build: (ts: string) => Omit<LiveCallEvent, "timestamp"> & { timestamp?: string };
 }
 
+type Language = "Yoruba" | "Hindi" | "Bengali";
+
 /** Scripted bilingual lines — native line + English translation. */
 const LINES: Record<
-  "Yoruba" | "Twi",
+  Language,
   { agentGreet: [string, string]; supGreet: [string, string]; agentAsk: [string, string]; supQuote: [string, string]; agentCounter: [string, string]; supClose: [string, string] }
 > = {
   Yoruba: {
-    agentGreet: ["Ẹ ku iṣẹ́. Mo ń pè nípa àwọn bàtà awọ.", "Good day. I'm calling about the leather sandals."],
-    supGreet: ["A dúpẹ́. Ẹ jọ̀wọ́ sọ iye tí ẹ fẹ́.", "Welcome. Please tell me the quantity you need."],
-    agentAsk: ["Ẹ̀ẹ́dẹ́gbẹ̀ta sí ọ̀tà, ìwọ̀n 40 sí 45.", "Five hundred pairs, sizes 40 to 45."],
-    supQuote: ["Owó rẹ̀ jẹ́ dọ́là márùn-ún ó lé.", "The price is just over five dollars a pair."],
-    agentCounter: ["A lè san dọ́là mẹ́rin ààbọ̀ tí ẹ bá fi kún ọ.", "We can do four-fifty if you add volume."],
-    supClose: ["Ó dára. À ṣe é fún ọ.", "Alright. We can make it work for you."],
+    agentGreet:  ["Ẹ ku iṣẹ́. Mo ń pè nípa àwọn bàtà awọ.", "Good day. I'm calling about the leather sandals."],
+    supGreet:    ["A dúpẹ́. Ẹ jọ̀wọ́ sọ iye tí ẹ fẹ́.", "Welcome. Please tell me the quantity you need."],
+    agentAsk:    ["Ẹ̀ẹ́dẹ́gbẹ̀ta sí ọ̀tà, ìwọ̀n 40 sí 45.", "Five hundred pairs, sizes 40 to 45."],
+    supQuote:    ["Owó rẹ̀ jẹ́ dọ́là márùn-ún ó lé.", "The price is just over five dollars a pair."],
+    agentCounter:["A lè san dọ́là mẹ́rin ààbọ̀ tí ẹ bá fi kún ọ.", "We can do four-fifty if you add volume."],
+    supClose:    ["Ó dára. À ṣe é fún ọ.", "Alright. We can make it work for you."],
   },
-  Twi: {
-    agentGreet: ["Maakye. Merefrɛ wo wɔ leather mpaboa ho.", "Good morning. I'm calling about the leather sandals."],
-    supGreet: ["Akwaaba. Kyerɛ me dodow a wopɛ.", "Welcome. Tell me the quantity you want."],
-    agentAsk: ["Mpaboa ahanum, size 40 kɔsi 45.", "Five hundred pairs, sizes 40 to 45."],
-    supQuote: ["Ne boɔ yɛ dollar num ne fa.", "The price is five and a half dollars a pair."],
-    agentCounter: ["Yɛbɛtumi atua dollar ɛnan ne fa.", "We can pay four-fifty a pair."],
-    supClose: ["Ɛyɛ. Yɛbɛyɛ ama wo.", "That's fine. We'll do it for you."],
+  Hindi: {
+    agentGreet:  ["Namaste ji, main HAGGL ki taraf se baat kar raha hoon, leather sandals ke baare mein.", "Hello sir, I'm calling from HAGGL about the leather sandals."],
+    supGreet:    ["Haan ji, batayiye — kitne pairs chahiye aapko?", "Yes sir, tell me — how many pairs do you need?"],
+    agentAsk:    ["Paanch sau pairs chahiye, size 40 se 45 tak, full-grain leather.", "Five hundred pairs, sizes 40 to 45, full-grain leather."],
+    supQuote:    ["Ji, hamare liye yeh paanch dollar bees cents padega per pair.", "Sir, this will cost us five dollars twenty cents per pair."],
+    agentCounter:["Kya char dollar sotra possible hai agar hum volume badhaayen?", "Can you do four-fifty if we increase the volume?"],
+    supClose:    ["Theek hai ji, dekh lete hain — kuch room hai.", "Alright sir, let's see — there's some room."],
+  },
+  Bengali: {
+    agentGreet:  ["Namaskar, ami HAGGL theke phone korchi leather sandal er byapare.", "Good day, I'm calling from HAGGL about the leather sandals."],
+    supGreet:    ["Haan, bolun — koto piece lagbe aapnar?", "Yes, please tell me — how many pieces do you need?"],
+    agentAsk:    ["Panchso pair lagbe, size chollish theke panchollish, full-grain leather.", "We need five hundred pairs, sizes 40 to 45, full-grain leather."],
+    supQuote:    ["Daam pore pach dollar bish cents per pair.", "The price comes to five dollars twenty cents per pair."],
+    agentCounter:["Char dollar panchash e dite parben ki jodi volume bariye dii?", "Can you do four-fifty if we increase volume?"],
+    supClose:    ["Thik ache, ami try korbo aapnar jonno.", "Alright, I'll try to make it work for you."],
   },
 };
 
@@ -42,7 +52,7 @@ function ev(
 export function scriptForCall(
   callId: string,
   supplierId: string,
-  language: "Yoruba" | "Twi",
+  language: Language,
   supplierName: string,
   units: number,
 ): Beat[] {
@@ -69,25 +79,17 @@ export function scriptForCall(
   });
 
   const beats: Beat[] = [
-    { offsetMs: 0, build: () => ev("call_initiated", callId, supplierId) },
-    { offsetMs: 900, build: () => ev("call_ringing", callId, supplierId) },
-    { offsetMs: 2600, build: () => ev("call_connected", callId, supplierId) },
-    tx(3800, "agent", L.agentGreet),
-    tx(5600, "supplier", L.supGreet),
-    {
-      offsetMs: 6600,
-      build: () =>
-        ev("negotiation_phase_change", callId, supplierId, { phase: "negotiation" }),
-    },
-    tx(7400, "agent", L.agentAsk),
-    tx(9300, "supplier", L.supQuote),
-    tx(11200, "agent", L.agentCounter),
+    { offsetMs: 0,     build: () => ev("call_initiated",          callId, supplierId) },
+    { offsetMs: 900,   build: () => ev("call_ringing",            callId, supplierId) },
+    { offsetMs: 2600,  build: () => ev("call_connected",          callId, supplierId) },
+    tx(3800,  "agent",    L.agentGreet),
+    tx(5600,  "supplier", L.supGreet),
+    { offsetMs: 6600, build: () => ev("negotiation_phase_change", callId, supplierId, { phase: "negotiation" }) },
+    tx(7400,  "agent",    L.agentAsk),
+    tx(9300,  "supplier", L.supQuote),
+    tx(11200, "agent",    L.agentCounter),
     tx(13000, "supplier", L.supClose),
-    {
-      offsetMs: 14200,
-      build: () =>
-        ev("negotiation_phase_change", callId, supplierId, { phase: "closing" }),
-    },
+    { offsetMs: 14200, build: () => ev("negotiation_phase_change", callId, supplierId, { phase: "closing" }) },
   ];
 
   if (outcome.outcome === "capped") {
@@ -117,8 +119,7 @@ export function scriptForCall(
     };
     beats.push({
       offsetMs: 15400,
-      build: () =>
-        ev("negotiation_result", callId, supplierId, { result }),
+      build: () => ev("negotiation_result", callId, supplierId, { result }),
     });
   }
 

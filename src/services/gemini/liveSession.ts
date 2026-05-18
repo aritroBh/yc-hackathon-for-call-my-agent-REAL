@@ -69,6 +69,12 @@ export interface GeminiSessionOptions {
 
   /** If provided, OpusInjector is activated for this session. */
   negotiationContext?: NegotiationContext
+
+  /**
+   * BCP-47 language code for the session (e.g. 'hi-IN', 'bn-IN', 'en-US').
+   * Passed to Gemini Live speechConfig for language-aware TTS.
+   */
+  languageCode?: string
 }
 
 export interface GeminiHandle {
@@ -77,6 +83,13 @@ export interface GeminiHandle {
    * Internally converts: mulaw 8kHz → PCM16 8kHz → PCM16 16kHz.
    */
   sendAudio(mulawBuf: Buffer): void
+
+  /**
+   * Forward raw PCM16 16kHz audio directly into the Gemini Live session.
+   * Use this when the caller already has PCM16 (e.g. Vapi custom-transcriber
+   * sends PCM16 stereo 16kHz — extract ch0 and pass here without mulaw decode).
+   */
+  sendPCM16k(pcmBuf: Buffer): void
 
   /**
    * Inject a text message mid-call into the Gemini Live session.
@@ -180,10 +193,16 @@ export async function openGeminiSession(
 
         systemInstruction: systemPromptText,
 
+        // Gemini handles end-of-speech detection natively — no custom VAD needed
+        realtimeInputConfig: {
+          automaticActivityDetection: {},
+        },
+
         speechConfig: {
           voiceConfig: {
             prebuiltVoiceConfig: { voiceName: 'Aoede' },
           },
+          ...(opts.languageCode ? { languageCode: opts.languageCode } : {}),
         },
       },
       callbacks: {
@@ -224,6 +243,16 @@ export async function openGeminiSession(
       liveSession.sendRealtimeInput({
         audio: {
           data: pcm16kBuf.toString('base64'),
+          mimeType: 'audio/pcm;rate=16000',
+        },
+      })
+    },
+
+    sendPCM16k(pcmBuf: Buffer): void {
+      // Raw PCM16 16kHz — from Vapi custom-transcriber (ch0 already extracted)
+      liveSession.sendRealtimeInput({
+        audio: {
+          data: pcmBuf.toString('base64'),
           mimeType: 'audio/pcm;rate=16000',
         },
       })

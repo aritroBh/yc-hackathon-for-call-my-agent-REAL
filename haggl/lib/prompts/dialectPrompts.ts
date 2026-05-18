@@ -249,6 +249,40 @@ const DIALECT_MAP: Record<string, DialectContext> = {
       goodbye: "Nante yiye",
     },
   },
+  "bn-IN": {
+    name: "Bangladesh / West Bengal (Bengali)",
+    locale: "bn-IN",
+    formalityLevel: "formal",
+    greetingPhrase:
+      "নমস্কার, আমি HAGGL-এর AI সহকারী। আমাদের ক্রয় সংক্রান্ত একটি বিষয়ে আপনার সাথে কিছুক্ষণ কথা বলতে পারব কি?",
+    closingPhrase:
+      "আপনার সময়ের জন্য অনেক ধন্যবাদ। আমরা বিস্তারিত তথ্য ইমেইলে পাঠাব। শুভেচ্ছা রইল।",
+    communicationStyle:
+      "Warm, relationship-first, respectful. Use formal 'আপনি' (aapni). Build rapport before price. Indirect refusals — listen for hesitation and qualifiers. Bengali suppliers value long-term partnerships over one-off deals.",
+    culturalNotes:
+      "Bengali business culture values personal relationships and trust. Decisions often involve multiple stakeholders and family consultation. Tea/hospitality small talk is expected before business. Silence may indicate discomfort, not agreement. Avoid rushing — patience signals respect. Avoid scheduling during Eid (variable) and Durga Puja (Oct). Use round numbers in pricing as it signals good faith.",
+    negotiationTips: [
+      "Begin with personal rapport — ask about business, not immediately about price",
+      "Use formal 'আপনি' (aapni) throughout — never informal 'তুমি' (tumi)",
+      "Indirect 'no' — phrases like 'দেখা যাক' (dekha jak — we'll see) often mean hesitation",
+      "Long-term partnership angle resonates strongly: emphasize ongoing relationship",
+      "Accept that negotiation rounds are expected; first price is opening offer only",
+      "Silence after a price offer means they are considering — do not fill the silence",
+      "Confirm all terms clearly in writing — verbal agreements may need reinforcement",
+    ],
+    phrases: {
+      greeting: "নমস্কার / আদাব",
+      thank_you: "ধন্যবাদ / অনেক ধন্যবাদ",
+      please: "অনুগ্রহ করে",
+      yes: "জি, হ্যাঁ",
+      no_thanks: "দেখা যাক / আমরা বিবেচনা করব",
+      sorry: "দুঃখিত / মাফ করবেন",
+      understand: "বুঝতে পেরেছি",
+      good_price: "দাম কি একটু কমানো সম্ভব?",
+      confirm: "আমি নিশ্চিত করে নিচ্ছি",
+      goodbye: "ধন্যবাদ। শুভেচ্ছা রইল।",
+    },
+  },
   "yo-NG": {
     name: "Nigeria (Yoruba)",
     locale: "yo-NG",

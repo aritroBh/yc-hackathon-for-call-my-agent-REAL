@@ -30,7 +30,7 @@ function buildSchedule(): { atMs: number; build: (ts: string) => unknown }[] {
     const call = seedCalls[callId];
     const supplier = seedSuppliers[call.supplier_id];
     const meta = supplier.metadata as Record<string, string>;
-    const language = meta.language === "Twi" ? "Twi" : "Yoruba";
+    const language = (meta.language as "Yoruba" | "Hindi" | "Bengali") ?? "Yoruba";
     const start = index * CALL_STAGGER_MS;
 
     for (const beat of scriptForCall(

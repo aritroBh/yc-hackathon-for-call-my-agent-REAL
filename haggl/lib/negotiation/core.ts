@@ -23,7 +23,7 @@ import { getCallQueue } from "@/lib/queue";
 import { getDispatcher } from "@/lib/dispatcher";
 
 const genAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
 // Per-call live conversation history. Vapi sends NO history for custom-voice
 // assistants, and the seeded demo call's DB transcript is a PRE-COMPLETED

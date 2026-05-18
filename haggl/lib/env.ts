@@ -12,7 +12,7 @@ const envSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
 
   GEMINI_API_KEY: z.string().min(1),
-  GEMINI_MODEL: z.string().default('gemini-3.1-flash-lite'),
+  GEMINI_MODEL: z.string().default('gemini-2.5-flash'),
   VAPI_API_KEY: z.string().min(1),
   VAPI_BASE_URL: z.string().url().default('https://api.vapi.ai'),
   VAPI_PHONE_NUMBER_ID: z.string().optional(),

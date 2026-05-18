@@ -49,24 +49,44 @@ export async function createVapiAssistant(
   const llmUrl = `${APP_URL}/api/vapi/llm/${encodeURIComponent(params.hagglCallId)}`;
   const voiceUrl = `${APP_URL}/api/vapi/voice?hcid=${encodeURIComponent(params.hagglCallId)}`;
 
+  // Derive HTTP base URL for bridge (wss:// → https://, ws:// → http://)
+  const BRIDGE_HTTP_URL = BRIDGE_WS_URL.replace(/^wss:\/\//, "https://").replace(/^ws:\/\//, "http://");
+  const bridgeVoiceUrl = `${BRIDGE_HTTP_URL}/vapi/gemini-voice?hcid=${encodeURIComponent(params.hagglCallId)}`;
+
+  const langLower = params.language.toLowerCase();
+
   const isGhanaian = ["twi", "akan", "tw-gh", "tw-GH"].some(
-    (v) => params.language.toLowerCase() === v.toLowerCase()
+    (v) => langLower === v.toLowerCase()
   );
-  const isHindi = ["hindi", "hi", "hi-in", "hi-IN"].some(
-    (v) => params.language.toLowerCase() === v.toLowerCase()
+  const isGeminiLive = ["hindi", "hi", "hi-in", "bengali", "bn", "bn-in", "english", "en", "en-us"].some(
+    (v) => langLower === v.toLowerCase()
   );
+
+  // Map language to BCP-47 code for WS URL param
+  const langCode =
+    langLower.startsWith("bn") || langLower === "bengali" ? "bn" :
+    langLower.startsWith("hi") || langLower === "hindi" ? "hi" : "en";
+
+  // Supplier name/region from metadata (best-effort; passed to Supermemory)
+  const supplierParam = encodeURIComponent((params as any).supplierName || "");
+  const regionParam = encodeURIComponent((params as any).region || "");
+
+  const geminiTranscriberUrl =
+    `${BRIDGE_WS_URL}/vapi/transcriber` +
+    `?hcid=${encodeURIComponent(params.hagglCallId)}` +
+    `&lang=${langCode}` +
+    (supplierParam ? `&supplier=${supplierParam}` : "") +
+    (regionParam ? `&region=${regionParam}` : "");
 
   const transcriber = isGhanaian
     ? {
         provider: "custom-transcriber" as const,
         server: { url: `${BRIDGE_WS_URL}/vapi/transcriber` },
       }
-    : isHindi
+    : isGeminiLive
     ? {
-        provider: "deepgram" as const,
-        model: "nova-2",
-        language: "hi",
-        smartFormat: true,
+        provider: "custom-transcriber" as const,
+        server: { url: geminiTranscriberUrl },
       }
     : {
         provider: "deepgram" as const,
@@ -80,11 +100,10 @@ export async function createVapiAssistant(
         provider: "custom-voice" as const,
         server: { url: voiceUrl },
       }
-    : isHindi
+    : isGeminiLive
     ? {
-        provider: "azure" as const,
-        voiceId: "hi-IN-MadhurNeural",
-        speed: 0.95,
+        provider: "custom-voice" as const,
+        server: { url: bridgeVoiceUrl },
       }
     : {
         provider: "azure" as const,
@@ -97,7 +116,7 @@ export async function createVapiAssistant(
     transcriber,
     model: {
       provider: "custom-llm",
-      model: process.env.GEMINI_MODEL || "gemini-3.1-flash-lite",
+      model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
       url: llmUrl,
       metadataSendMode: "off",
       messages: [{ role: "system", content: params.systemPrompt }],
