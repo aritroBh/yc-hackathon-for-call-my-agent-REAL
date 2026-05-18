@@ -5,7 +5,7 @@ import { WebSocketServer } from "ws";
 import { fileURLToPath, pathToFileURL } from "url";
 import { dirname, join, resolve } from "path";
 import { existsSync } from "fs";
-import { GoogleGenAI, Modality } from "@google/genai";
+import { GoogleGenAI, Modality, StartSensitivity, EndSensitivity } from "@google/genai";
 
 // Load .env — try repo root first, then haggl/, then CWD
 {
@@ -175,7 +175,7 @@ app.post("/call/twiml", (req, res) => {
   console.log(`[twiml] stream url: ${wsUrl}`);
   res.type("text/xml").send(
     `<?xml version="1.0" encoding="UTF-8"?>` +
-    `<Response><Connect><Stream url="${wsUrl}"/></Connect></Response>`
+    `<Response><Connect><Stream url="${wsUrl}" track="inbound_track"/></Connect></Response>`
   );
 });
 
@@ -209,9 +209,20 @@ async function openGeminiSession(systemPromptText, opts = {}) {
       config: {
         responseModalities: [Modality.AUDIO],
         systemInstruction: systemPromptText,
+        temperature: 0,
+        inputAudioTranscription: {},
+        outputAudioTranscription: {},
         speechConfig: {
           voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } },
           ...(opts.languageCode ? { languageCode: opts.languageCode } : {}),
+        },
+        realtimeInputConfig: {
+          automaticActivityDetection: {
+            disabled: false,
+            startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW,
+            endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_LOW,
+            silenceDurationMs: 700,
+          },
         },
       },
       callbacks: {
@@ -293,19 +304,32 @@ twilioWss.on("connection", (ws, req) => {
   let closed = false;
 
   const systemPrompt =
-    `You are a Bengali-speaking procurement agent for HAGGL. You are negotiating to purchase ` +
+    `You are a Bengali-speaking procurement agent for HAGGL, negotiating to purchase ` +
     `500 pairs of men's leather sandals (sizes 40–45, full-grain). ` +
-    `Target price: $4.25/pair. Hard ceiling: $5.00/pair. Required delivery: within 4 weeks. ` +
-    `\n\nLanguage & style rules:\n` +
-    `- Speak in Bengali (formal আপনি form) as the PRIMARY language.\n` +
-    `- If the supplier speaks Hindi or English, reply in their language briefly, then gently return to Bengali.\n` +
-    `- Be warm and relationship-first — build genuine rapport before discussing price.\n` +
-    `- Use natural conversational fillers: "আচ্ছা", "হ্যাঁ", "ঠিক আছে", "বুঝলাম" to sound human.\n` +
-    `- Pause naturally after asking a question. NEVER speak while the other person is talking.\n` +
-    `- When negotiating price: anchor low, acknowledge their constraints, find a middle ground.\n` +
-    `- Confirm any agreed price or terms explicitly before ending the call.\n` +
-    `\nTurn-taking rule: After you finish speaking, go completely silent and wait. ` +
-    `Do not speak again until the supplier has replied. Never reply to your own audio.`;
+    `Target price: $4.25/pair. Hard ceiling: $5.00/pair. Delivery: within 4 weeks.\n\n` +
+
+    `VOICE RULES — NON-NEGOTIABLE:\n` +
+    `- Max 2 sentences per response. Prefer 1.\n` +
+    `- Ask ONE question per turn. Never two questions in the same response.\n` +
+    `- No lists, bullet points, numbered items, or markdown — this is a phone call.\n` +
+    `- Always use contractions and natural shortened forms in Bengali.\n` +
+    `- Start sentences naturally: "আচ্ছা,", "হ্যাঁ,", "দেখুন —", "আসলে —", "বলুন,"\n` +
+    `- BANNED acknowledgments (never use): "অবশ্যই", "নিশ্চয়ই", "ধন্যবাদ আপনার মতামতের জন্য", "আমি বুঝতে পারছি"\n` +
+    `- Rotate short acknowledgments (max once per 4 turns each): "ঠিক আছে।" / "বুঝলাম।" / "হ্যাঁ।" / "আচ্ছা।"\n` +
+    `- Use stall phrases when thinking: "একটু ভাবছি।" / "এক সেকেন্ড।" / "ঠিকঠাক বলছি —"\n\n` +
+
+    `LANGUAGE RULES:\n` +
+    `- Primary language: Bengali (formal আপনি form).\n` +
+    `- If supplier speaks Hindi, respond briefly in Hindi then return to Bengali.\n` +
+    `- If supplier speaks English, respond in English briefly then return to Bengali.\n\n` +
+
+    `NEGOTIATION APPROACH:\n` +
+    `- Build rapport first — one or two warm exchanges before price.\n` +
+    `- Anchor low. Acknowledge their constraints. Find middle ground.\n` +
+    `- Confirm any agreed price and delivery terms explicitly before ending.\n\n` +
+
+    `TURN-TAKING RULE: After you finish speaking, go completely silent and wait. ` +
+    `Do not speak again until the supplier has responded. Never reply to your own audio.`;
 
   ws.on("message", async (raw) => {
     try {
